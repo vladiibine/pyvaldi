@@ -51,7 +51,7 @@ pyvaldi
 
 Test helper library, for orchestrating parallel processes in order to make assertions about their state
 
-* Free software: BSD license
+* Free software: MIT license
 
 Installation
 ============
