@@ -53,6 +53,23 @@ Test helper library, for orchestrating parallel processes in order to make asser
 
 * Free software: MIT license
 
+Introduction
+============
+This library will help you to test systems that do not have the ideal architecture. 
+
+If you've got a DB server, and multiple other nodes that connect to it, changing state concurrently, you know how annoying it can be to reason about such situations.
+
+While your architecture should of course be improved (if possible), this library makes it easier to make assertions about the state of such a system.
+
+I use 3 concepts for this: **Starters**, **Checkpoints** and **Runners**.
+
+**Starters** are similar to Threads. They will start a certain chain of actions. In other words, they'll get a callable object and call it with some arguments. This callable represents your process under test.
+
+A **checkpoint** represents a snapshot in the life of one of the tested processes. A checkpoint is  considered reached if all actions up to that logical point have been carried out (useful examples: all transactions have been commited OR only started - to test system consistency, all HTTP requests have been sent and responses have been received, or more generally, all methods have been called **UP TO** that point)
+
+A **runner** will run your processes (represented by the starters) in parallel. It must also know the order that the checkpoints should be hit in the life of those processes. It will pause the processes, if necessary, to ensure the checkpoints are hit in exactly the order they should.
+When runners pause, you can make assertions about the state of the system (check the DB or any other relevant stateful system). You can then manually resume the runner to either run to the next checkpoint, skip to a specific checkpoint, or to run until all processes have finished.
+
 Installation
 ============
 
