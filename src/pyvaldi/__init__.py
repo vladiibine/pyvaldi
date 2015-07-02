@@ -56,7 +56,8 @@ class Runner(object):
 
     def _run_to_checkpoint(self, thread, checkpoint):
         """Allow the thread to run until the checkpoint is reached
-        :param StartAwareThread thread: the thread to dun
+
+        :param SleepyThread thread: the thread to run
         :param checkpoint: checkpoint at which execution will once again stop
         """
         if not thread.is_started():
@@ -90,3 +91,13 @@ class StartAwareThread(threading.Thread):
 
     def is_started(self):
         return self._started
+
+
+class SleepyThread(StartAwareThread):
+    """Thread that can be woken up to run until the next checkpoint"""
+    def __init__(self, *args, **kwargs):
+        super(SleepyThread, self).__init__(*args, **kwargs)
+        self.event = threading.Event()
+
+    def wake_up(self):
+        pass
