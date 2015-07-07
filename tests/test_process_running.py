@@ -38,6 +38,20 @@ class SingleThreadTestCase(unittest.TestCase):
         next(runner)
         self.assertEqual(machine.steps, [1, 2])
 
+    def test_second_checkpoint_is_reached(self):
+        machine = ThreePhaseMachine()
+        starter = ProcessStarter(machine)
+
+        cp1 = starter.add_checkpoint_before(machine.second_phase)
+        cp2 = starter.add_checkpoint_before(machine.third_phase)
+
+        runner = Runner([starter], [cp1, cp2])
+
+        next(runner)
+        self.assertEqual(machine.steps, [1])
+        next(runner)
+        self.assertEqual(machine.steps, [1, 2])
+
 
 class TwoThreadsTestCase(unittest.TestCase):
     def test_first_thread_finishes_then_second_starts(self):

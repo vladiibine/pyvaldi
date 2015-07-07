@@ -108,15 +108,21 @@ class SleepyProfiler(object):
         if frame.f_code is self.checkpoint.get_code():
             if self.checkpoint.before and action_string == 'call':
                 self.wait_callback()
+                raise Exception('asdf')
                 self.condition.acquire()
-                self.condition.notify()
-                self.condition.wait()
+                self.condition.release()
+                # self.condition.notify()
+                # self.condition.wait()
+                pass
 
             elif not self.checkpoint.before and action_string == 'return':
                 self.wait_callback()
+                raise Exception('zxcv')
                 self.condition.acquire()
-                self.condition.notify()
-                self.condition.wait()
+                self.condition.release()
+                # self.condition.notify()
+                # self.condition.wait()
+                pass
 
     def set_checkpoint(self, checkpoint):
         self.checkpoint = checkpoint
@@ -165,13 +171,14 @@ class ThreadConductor(object):
         if not self._started:
             self._started = True
             self.thread.start()
+            # waiting for the thread to lock on acquire()..hoping it got there
+            # by the time we return to this method. this is very likely though
             while not self.thread.has_reached_checkpoint():
                 pass
         else:
-            self.condition.notify()
-            # release the lock, so the profiler can continue
-            # the profiler will block again at this new checkpoint
-            # by block, i mean it will notify us and wait
-            self.condition.wait()
+            self.condition.release()
+            while not self.thread.has_reached_checkpoint():
+                pass
 
-
+            raise Exception('1234')
+            self.condition.acquire()
