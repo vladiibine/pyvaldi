@@ -108,24 +108,29 @@ class SleepyProfiler(object):
         if frame.f_code is self.checkpoint.get_code():
             if self.checkpoint.before and action_string == 'call':
                 self.wait_callback()
-                raise Exception('asdf')
                 self.condition.acquire()
+                self.condition.wait()
                 self.condition.release()
-                # self.condition.notify()
-                # self.condition.wait()
-                pass
 
             elif not self.checkpoint.before and action_string == 'return':
                 self.wait_callback()
-                raise Exception('zxcv')
                 self.condition.acquire()
+                self.condition.wait()
                 self.condition.release()
-                # self.condition.notify()
-                # self.condition.wait()
-                pass
 
     def set_checkpoint(self, checkpoint):
         self.checkpoint = checkpoint
+
+
+class ThreadState(object):
+    def __init__(self):
+        self.state = False
+
+    def switch_on(self):
+        self.state = True
+
+    def switch_off(self):
+        self.state = False
 
 
 class ProfilingThread(threading.Thread):
@@ -133,33 +138,32 @@ class ProfilingThread(threading.Thread):
         super(ProfilingThread, self).__init__(target=target, args=args, kwargs=kwargs)  # noqa
         self.condition = condition
         self.checkpoint = None
-        self.checkpoint_reached = False
+        self.checkpoint_reached = ThreadState()
         self.profiler = None
 
     def set_checkpoint(self, checkpoint):
-        self.checkpoint_reached = False
+        self.checkpoint_reached.switch_off()
         self.checkpoint = checkpoint
         if self.profiler:
             self.profiler.set_checkpoint(checkpoint)
 
     def run(self):
         self.profiler = SleepyProfiler(
-            self.checkpoint, self.condition, self.wait_wallback)
+            self.checkpoint, self.condition, self.wait_callback)
 
         sys.setprofile(self.profiler)
         super(ProfilingThread, self).run()
 
-    def wait_wallback(self):
-        self.checkpoint_reached = True
+    def wait_callback(self):
+        self.checkpoint_reached.switch_on()
 
     def has_reached_checkpoint(self):
-        return self.checkpoint_reached
+        return self.checkpoint_reached.state
 
 
 class ThreadConductor(object):
     def __init__(self, target, args, kwargs):
-        self.condition = threading.Condition()
-        self.condition.acquire()
+        self.condition = threading.Condition(lock=threading.Lock())
         self.thread = ProfilingThread(
             target=target, args=args, kwargs=kwargs, condition=self.condition)
         self.thread.setDaemon(True)
@@ -176,9 +180,8 @@ class ThreadConductor(object):
             while not self.thread.has_reached_checkpoint():
                 pass
         else:
-            self.condition.release()
             while not self.thread.has_reached_checkpoint():
                 pass
-
-            raise Exception('1234')
             self.condition.acquire()
+            self.condition.notify()
+            self.condition.release()
