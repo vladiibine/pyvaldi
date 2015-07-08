@@ -65,7 +65,7 @@ class TwoThreadsTestCase(unittest.TestCase):
         self.assertIs(next(runner), cp2_3)
 
 
-class SingleProcessTestCase(unittest.TestCase):
+class SingleThreadTestCase(unittest.TestCase):
     def test_single_checkpoint_is_returned_by_runner(self):
         machine = ThreePhaseMachine()
 
