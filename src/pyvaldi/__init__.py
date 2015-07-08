@@ -45,9 +45,13 @@ class Runner(object):
     def next(self):
         """Lets the 2 processes run until the next checkpoint is reached """
         next_checkpoint = self.checkpoints[self._next_checkpoint_idx]
+        if self._next_checkpoint_idx > 0:
+            last_checkpoint = self.checkpoints[self._next_checkpoint_idx - 1]
+        else:
+            last_checkpoint = None
 
         runnable_conductor = self._threads[next_checkpoint.starter]
-        self._run_to_checkpoint(runnable_conductor, next_checkpoint)
+        runnable_conductor.start_or_continue(next_checkpoint, last_checkpoint)
 
         self._next_checkpoint_idx += 1
         return next_checkpoint
@@ -55,14 +59,6 @@ class Runner(object):
     def __iter__(self):
         return self
 
-    def _run_to_checkpoint(self, conductor, checkpoint):
-        """Allow the thread to run until the checkpoint is reached
-
-        :param ThreadConductor conductor: the thread to run
-        :param Checkpoint checkpoint: checkpoint at which execution will once
-            again stop
-        """
-        conductor.start_or_continue(checkpoint)
 
 
 class Checkpoint(object):
@@ -99,38 +95,34 @@ def create_sleepy_profiler(checkpoint, condition):
 
 
 class SleepyProfiler(object):
-    def __init__(self, checkpoint, condition, wait_callback):
+    def __init__(self, checkpoint, condition, checkpoint_reached_callback):
         self.checkpoint = checkpoint
         self.condition = condition
-        self.wait_callback = wait_callback
+        self.checkpoint_reached_callback = checkpoint_reached_callback
 
     def __call__(self, frame, action_string, dunno):
         if frame.f_code is self.checkpoint.get_code():
             if self.checkpoint.before and action_string == 'call':
-                self.wait_callback()
+                with open('/tmp/before_callback', 'w') as f:
+                    f.write(str(self.checkpoint_reached_callback.im_self._checkpoints_reached))
+                self.checkpoint_reached_callback(self.checkpoint)
+                with open('/tmp/after_callback', 'w') as f:
+                    f.write(str(self.checkpoint_reached_callback.im_self._checkpoints_reached))
+
                 self.condition.acquire()
-                self.condition.wait()
+                for _ in range(999):
+                    self.condition.wait()
                 self.condition.release()
 
             elif not self.checkpoint.before and action_string == 'return':
-                self.wait_callback()
+                self.checkpoint_reached_callback(self.checkpoint)
                 self.condition.acquire()
-                self.condition.wait()
+                for _ in range(999):
+                    self.condition.wait()
                 self.condition.release()
 
     def set_checkpoint(self, checkpoint):
         self.checkpoint = checkpoint
-
-
-class ThreadState(object):
-    def __init__(self):
-        self.state = False
-
-    def switch_on(self):
-        self.state = True
-
-    def switch_off(self):
-        self.state = False
 
 
 class ProfilingThread(threading.Thread):
@@ -138,27 +130,35 @@ class ProfilingThread(threading.Thread):
         super(ProfilingThread, self).__init__(target=target, args=args, kwargs=kwargs)  # noqa
         self.condition = condition
         self.checkpoint = None
-        self.checkpoint_reached = ThreadState()
         self.profiler = None
+        self._checkpoints_reached = []
+        self._checkpoint_edit_lock = threading.Lock()
 
     def set_checkpoint(self, checkpoint):
-        self.checkpoint_reached.switch_off()
+        # This is the culprit!!! (i think...) This was setting the switch off
+        # after it was being set on, causing the controller thread to spin
+        # forever on the loop `.has_reached_checkpoint()`
         self.checkpoint = checkpoint
         if self.profiler:
             self.profiler.set_checkpoint(checkpoint)
 
     def run(self):
         self.profiler = SleepyProfiler(
-            self.checkpoint, self.condition, self.wait_callback)
+            self.checkpoint, self.condition, self.checkpoint_reached_callback)
 
         sys.setprofile(self.profiler)
         super(ProfilingThread, self).run()
 
-    def wait_callback(self):
-        self.checkpoint_reached.switch_on()
+    def checkpoint_reached_callback(self, checkpoint):
+        self._checkpoint_edit_lock.acquire()
+        self._checkpoints_reached.append(checkpoint)
+        self._checkpoint_edit_lock.release()
 
-    def has_reached_checkpoint(self):
-        return self.checkpoint_reached.state
+    def has_reached_checkpoint(self, checkpoint):
+        self._checkpoint_edit_lock.acquire()
+        result = checkpoint in self._checkpoints_reached
+        self._checkpoint_edit_lock.release()
+        return result
 
 
 class ThreadConductor(object):
@@ -169,18 +169,20 @@ class ThreadConductor(object):
         self.thread.setDaemon(True)
         self._started = False
 
-    def start_or_continue(self, checkpoint):
-        self.thread.set_checkpoint(checkpoint)
+    def start_or_continue(self, next_checkpoint, last_checkpoint):
+        self.thread.set_checkpoint(next_checkpoint)
 
         if not self._started:
             self._started = True
             self.thread.start()
             # waiting for the thread to lock on acquire()..hoping it got there
             # by the time we return to this method. this is very likely though
-            while not self.thread.has_reached_checkpoint():
+            while not self.thread.has_reached_checkpoint(next_checkpoint):
                 pass
         else:
-            while not self.thread.has_reached_checkpoint():
+            with open('/tmp/checkpoint_check', 'w') as f:
+                f.write(str(self.thread._checkpoints_reached) + ' BUT ' + str(last_checkpoint))
+            while not self.thread.has_reached_checkpoint(last_checkpoint):
                 pass
             self.condition.acquire()
             self.condition.notify()

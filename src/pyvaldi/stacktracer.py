@@ -75,6 +75,7 @@ class TraceDumper(threading.Thread):
     def stacktraces(self):
         fout = file(self.fpath,"wb+")
         try:
+            # import pydevd; pydevd.settrace()
             fout.write(stacktraces())
         finally:
             fout.close()
