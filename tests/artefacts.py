@@ -15,3 +15,6 @@ class ThreePhaseMachine(object):
         self.first_phase()
         self.second_phase()
         self.third_phase()
+
+    def __repr__(self):
+        return u'Machine: {}'.format(self.steps)

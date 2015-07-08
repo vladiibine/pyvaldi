@@ -52,7 +52,11 @@ class Runner(object):
         last_checkpoint = self._get_last_thread_checkpoint(
             next_checkpoint, self.checkpoints)
 
-        runnable_conductor = self._threads[next_checkpoint.starter]
+        if next_checkpoint is None:
+            runnable_conductor = self._threads[last_checkpoint.starter]
+        else:
+            runnable_conductor = self._threads[next_checkpoint.starter]
+
         runnable_conductor.start_or_continue(next_checkpoint, last_checkpoint)
 
         self._next_checkpoint_idx += 1
@@ -102,6 +106,10 @@ class SleepyProfiler(object):
             return
 
         current_checkpoint = self.confirming_checkpoints[self.checkpoint_idx]
+
+        if current_checkpoint is None:
+            return
+
         if frame.f_code is not current_checkpoint.get_code():
             return
 
@@ -139,6 +147,11 @@ class ProfilingThread(threading.Thread):
         sys.setprofile(self.profiler)
         super(ProfilingThread, self).run()
 
+        # hardcoded...yes... but the None checkpoint means the thread is done
+        with open('/tmp/checkpoints', 'w') as f:
+            f.write('reached the end')
+        self.checkpoint_reached_callback(None)
+
     def checkpoint_reached_callback(self, checkpoint):
         self._checkpoint_edit_lock.acquire()
         self._checkpoints_reached.append(checkpoint)
@@ -170,10 +183,16 @@ class ThreadConductor(object):
             while not self.thread.has_reached_checkpoint(next_checkpoint):
                 pass
         else:
-            with open('/tmp/checkpoint_check', 'w') as f:
-                f.write('reacher' + str(self.thread._checkpoints_reached) + ' BUT ast=' + str(last_checkpoint) + ' AND next=' + str(next_checkpoint))
+            # wait for the thread to hit the last checkpoint
             while not self.thread.has_reached_checkpoint(last_checkpoint):
                 pass
+
             self.condition.acquire()
             self.condition.notify()
             self.condition.release()
+
+            # if at the end, also wait for the thread to die
+            if next_checkpoint is None:
+                while not self.thread.has_reached_checkpoint(None):
+                    pass
+

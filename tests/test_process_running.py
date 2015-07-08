@@ -67,8 +67,6 @@ class SingleThreadTestCase(unittest.TestCase):
 
 class TwoThreadsTestCase(unittest.TestCase):
     def test_first_thread_finishes_then_second_starts(self):
-        from pyvaldi import stacktracer
-        stacktracer.trace_start('some.html')
         first_machine = ThreePhaseMachine()
         second_machine = ThreePhaseMachine()
 
@@ -85,4 +83,3 @@ class TwoThreadsTestCase(unittest.TestCase):
         self.assertEqual(second_machine.steps, [])
         self.assertIs(next(runner), cp2)
         self.assertEqual(second_machine.steps, [1, 2, 3])
-        stacktracer.trace_stop()
