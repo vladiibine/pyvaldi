@@ -67,6 +67,8 @@ class SingleThreadTestCase(unittest.TestCase):
 
 class TwoThreadsTestCase(unittest.TestCase):
     def test_first_thread_finishes_then_second_starts(self):
+        from pyvaldi import stacktracer
+        stacktracer.trace_start('some.html')
         first_machine = ThreePhaseMachine()
         second_machine = ThreePhaseMachine()
 
@@ -77,9 +79,13 @@ class TwoThreadsTestCase(unittest.TestCase):
         cp2 = second_starter.add_checkpoint_before(second_machine.first_phase)
 
         runner = Runner([first_starter, second_starter], [cp1, cp2])
+        with open('/tmp/checkpoints', 'w') as f:
+            f.write('cps: ' + str([cp1.get_code(), cp2.get_code()]))
 
         self.assertIs(next(runner), cp1)
         self.assertEqual(first_machine.steps, [1, 2, 3])
         self.assertEqual(second_machine.steps, [])
         self.assertIs(next(runner), cp2)
+        next(runner)
         self.assertEqual(second_machine.steps, [1, 2, 3])
+        stacktracer.trace_stop()
