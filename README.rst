@@ -103,17 +103,18 @@ Copy-paste from the tests module. This illustrates how 2 processes, running TwoP
             cp1 = first_starter.add_checkpoint_after(first_machine.second_phase)
     
             second_starter = ProcessStarter(second_machine)
-            cp2 = second_starter.add_checkpoint_before(second_machine.first_phase)
+            cp2 = second_starter.add_checkpoint_before(second_machine.second_phase)
+            cp3 = second_starter.add_checkpoint_after(second_machine.second_phase)
     
-            runner = Runner([first_starter, second_starter], [cp1, cp2])
+            runner = Runner([first_starter, second_starter], [cp1, cp2, cp3])
     
             self.assertIs(next(runner), cp1)
             self.assertEqual(first_machine.steps, [1, 2])
             self.assertEqual(second_machine.steps, [])
             self.assertIs(next(runner), cp2)
+            self.assertEqual(second_machine.steps, [1])
+            self.assertIs(next(runner), cp3)
             self.assertEqual(second_machine.steps, [1, 2])
-
-
 Installation
 ============
 
