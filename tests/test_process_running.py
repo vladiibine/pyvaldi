@@ -28,10 +28,20 @@ class SingleThreadTestCase(unittest.TestCase):
         next(runner)
         self.assertEqual(machine.steps, [1, 2, 3])
 
-    def test_run_to_first_checkpoint(self):
+    def test_run_to_first_checkpoint_before_method(self):
         machine = ThreePhaseMachine()
         starter = ProcessStarter(machine)
         cp = starter.add_checkpoint_before(machine.third_phase)
+
+        runner = Runner([starter], [cp])
+
+        next(runner)
+        self.assertEqual(machine.steps, [1, 2])
+
+    def test_run_to_first_checkpoint_after_method(self):
+        machine = ThreePhaseMachine()
+        starter = ProcessStarter(machine)
+        cp = starter.add_checkpoint_after(machine.second_phase)
 
         runner = Runner([starter], [cp])
 
@@ -46,6 +56,9 @@ class SingleThreadTestCase(unittest.TestCase):
         cp2 = starter.add_checkpoint_before(machine.third_phase)
 
         runner = Runner([starter], [cp1, cp2])
+
+        with open('/tmp/checkpoints', 'w') as f:
+            f.write('cps: ' + str([cp1.get_code(), cp2.get_code()]))
 
         next(runner)
         self.assertEqual(machine.steps, [1])
@@ -67,8 +80,6 @@ class SingleThreadTestCase(unittest.TestCase):
 
 class TwoThreadsTestCase(unittest.TestCase):
     def test_first_thread_finishes_then_second_starts(self):
-        from pyvaldi import stacktracer
-        stacktracer.trace_start('some.html')
         first_machine = ThreePhaseMachine()
         second_machine = ThreePhaseMachine()
 
@@ -79,8 +90,6 @@ class TwoThreadsTestCase(unittest.TestCase):
         cp2 = second_starter.add_checkpoint_before(second_machine.first_phase)
 
         runner = Runner([first_starter, second_starter], [cp1, cp2])
-        with open('/tmp/checkpoints', 'w') as f:
-            f.write('cps: ' + str([cp1.get_code(), cp2.get_code()]))
 
         self.assertIs(next(runner), cp1)
         self.assertEqual(first_machine.steps, [1, 2, 3])
@@ -88,4 +97,3 @@ class TwoThreadsTestCase(unittest.TestCase):
         self.assertIs(next(runner), cp2)
         next(runner)
         self.assertEqual(second_machine.steps, [1, 2, 3])
-        stacktracer.trace_stop()
