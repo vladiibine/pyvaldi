@@ -49,6 +49,8 @@ class SingleThreadTestCase(unittest.TestCase):
         self.assertEqual(machine.steps, [1, 2])
 
     def test_second_checkpoint_is_reached(self):
+        # from pyvaldi import stacktracer
+        # stacktracer.trace_start('some.html')
         machine = ThreePhaseMachine()
         starter = ProcessStarter(machine)
 
@@ -57,12 +59,11 @@ class SingleThreadTestCase(unittest.TestCase):
 
         runner = Runner([starter], [cp1, cp2])
 
-        with open('/tmp/checkpoints', 'w') as f:
-            f.write('cps: ' + str([cp1.get_code(), cp2.get_code()]))
-
         next(runner)
         self.assertEqual(machine.steps, [1])
         next(runner)
+        # import time; time.sleep(20)
+        # stacktracer.trace_stop()
         self.assertEqual(machine.steps, [1, 2])
 
     def test_continue_until_the_end(self):

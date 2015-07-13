@@ -94,13 +94,6 @@ class Checkpoint(object):
     def get_code(self):
         return self.callable.func_code
 
-log_lock = threading.Lock()
-def log(msg, fname):
-    log_lock.acquire()
-    with open(fname, 'a') as f:
-        f.write(str(msg) + '\n')
-    log_lock.release()
-
 
 class SleepyProfiler(object):
     def __init__(self, checkpoint, condition, checkpoint_reached_callback):
@@ -110,25 +103,16 @@ class SleepyProfiler(object):
         self.checkpoint_reached_callback = checkpoint_reached_callback
 
     def __call__(self, frame, action_string, dunno):
-        log('thread: ' + str(threading.current_thread()) + ' code: ' + str(frame.f_code) + ' action:' + str(action_string), '/tmp/thread_log')
         if self.checkpoint_idx >= len(self.confirming_checkpoints):
             return
-
-        if action_string == 'return':
-            log('1111111', '/tmp/thread_log')
 
         current_checkpoint = self.confirming_checkpoints[self.checkpoint_idx]
 
         if current_checkpoint is None:
             return
 
-        if action_string == 'return':
-            log('2222222222', '/tmp/thread_log')
-
         if frame.f_code is not current_checkpoint.get_code():
             return
-
-        log('before? ' + str(current_checkpoint.before) + action_string  + ' cp: ' + str(current_checkpoint.get_code()), '/tmp/in_profiler')
 
         if ((current_checkpoint.before and action_string == 'call') or
                 (not current_checkpoint.before and action_string == 'return')):
@@ -169,7 +153,6 @@ class ProfilingThread(threading.Thread):
 
     def checkpoint_reached_callback(self, checkpoint):
         self._checkpoint_edit_lock.acquire()
-        # log('CP REACHED' + str(checkpoint) + ' from thread' + str(threading.current_thread()), '/tmp/checkpoints_reached')
         self._checkpoints_reached.append(checkpoint)
         self._checkpoint_edit_lock.release()
 
@@ -189,30 +172,25 @@ class ThreadConductor(object):
         self._started = False
 
     def start_or_continue(self, next_checkpoint, last_checkpoint):
-        with open('/tmp/start_or', 'a') as f:
-            f.write('next ' + str(next_checkpoint) + ' last ' + str(last_checkpoint)+'\n')
         self.thread.set_checkpoint(next_checkpoint)
 
         if not self._started:
             self._started = True
+            # Start
             self.thread.start()
-            # waiting for the thread to lock on acquire()..hoping it got there
-            # by the time we return to this method. this is very likely though
-            with open('/tmp/afile', 'w') as f:
-                f.write('thread alive?' + str(self.thread.is_alive()) + ' next ' + str(next_checkpoint.get_code()) + ' last ' + str(last_checkpoint)+ '\n')
+            # Join
             while not self.thread.has_reached_checkpoint(next_checkpoint) and self.thread.is_alive():
                 time.sleep(0.1)
         else:
-            # wait for the thread to hit the last checkpoint
+            # wait for the thread to hit the last checkpoint (Join)
             while not self.thread.has_reached_checkpoint(last_checkpoint) and self.thread.is_alive():
                 time.sleep(0.1)
 
             self.condition.acquire()
+            # Notify other thread to continue its execution
             self.condition.notify()
             self.condition.release()
 
-            # if at the end, also wait for the thread to die
-            if next_checkpoint is None:
-                while not self.thread.has_reached_checkpoint(None) and self.thread.is_alive():
-                    pass
-
+            # wait for the thread to hit the current checkpoint (Join)
+            while not self.thread.has_reached_checkpoint(next_checkpoint) and self.thread.is_alive():
+                time.sleep(0.1)
