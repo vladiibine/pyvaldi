@@ -49,8 +49,6 @@ class SingleThreadTestCase(unittest.TestCase):
         self.assertEqual(machine.steps, [1, 2])
 
     def test_second_checkpoint_is_reached(self):
-        # from pyvaldi import stacktracer
-        # stacktracer.trace_start('some.html')
         machine = ThreePhaseMachine()
         starter = ProcessStarter(machine)
 
@@ -62,8 +60,6 @@ class SingleThreadTestCase(unittest.TestCase):
         next(runner)
         self.assertEqual(machine.steps, [1])
         next(runner)
-        # import time; time.sleep(20)
-        # stacktracer.trace_stop()
         self.assertEqual(machine.steps, [1, 2])
 
     def test_continue_until_the_end(self):
@@ -98,3 +94,46 @@ class TwoThreadsTestCase(unittest.TestCase):
         self.assertIs(next(runner), cp2)
         next(runner)
         self.assertEqual(second_machine.steps, [1, 2, 3])
+
+    def test_simple_order_for_2_processes(self):
+        # Time -> ...
+        # Process 1: CP1   CP2   CP3
+        # Process 2:                      CP1   CP2   CP3
+        machine1 = ThreePhaseMachine()
+        machine2 = ThreePhaseMachine()
+        starter1 = ProcessStarter(machine1)
+        starter2 = ProcessStarter(machine2)
+
+        cp1_1 = starter1.add_checkpoint_before(machine1.first_phase)
+        cp1_2 = starter1.add_checkpoint_before(machine1.second_phase)
+        cp1_3 = starter1.add_checkpoint_before(machine1.third_phase)
+
+        cp2_1 = starter2.add_checkpoint_before(machine2.first_phase)
+        cp2_2 = starter2.add_checkpoint_before(machine2.second_phase)
+        cp2_3 = starter2.add_checkpoint_before(machine2.third_phase)
+
+        runner = Runner(
+            [starter1, starter2],
+            [cp1_1, cp1_2, cp1_3, cp2_1, cp2_2, cp2_3]
+        )
+
+        next(runner)
+        self.assertEqual(machine1.steps, [])
+        next(runner)
+        self.assertEqual(machine1.steps, [1])
+        next(runner)
+        self.assertEqual(machine1.steps, [1, 2])
+        next(runner)
+        self.assertEqual(machine2.steps, [])
+        self.assertEqual(machine1.steps, [1, 2, 3])
+        next(runner)
+        self.assertEqual(machine2.steps, [1])
+        next(runner)
+        self.assertEqual(machine2.steps, [1, 2])
+        next(runner)
+        self.assertEqual(machine2.steps, [1, 2, 3])
+
+        self.fail(
+            "Fix commented tests: switching from thread1 to 2 leaves t1 "
+            "sleeping")
+
