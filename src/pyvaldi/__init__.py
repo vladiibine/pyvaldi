@@ -45,23 +45,41 @@ class Runner(object):
 
     def next(self):
         """Lets the 2 processes run until the next checkpoint is reached """
-        if self._next_checkpoint_idx >= len(self.checkpoints):
-            next_checkpoint = None
-        else:
-            next_checkpoint = self.checkpoints[self._next_checkpoint_idx]
+        next_checkpoint, last_checkpoint = self._get_next_and_last_checkpoint(
+            self.checkpoints, self._next_checkpoint_idx
+        )
 
-        last_checkpoint = self._get_last_thread_checkpoint(
-            next_checkpoint, self.checkpoints)
+        runnable_conductor = self._get_runnable_conductor(
+            last_checkpoint, next_checkpoint)
 
+        runnable_conductor.start_or_continue(next_checkpoint)
+
+        self._next_checkpoint_idx += 1
+        return next_checkpoint
+
+    def _get_runnable_conductor(self, last_checkpoint, next_checkpoint):
+        """Return the ThreadConductor that should run next"""
         if next_checkpoint is None:
             runnable_conductor = self._threads[last_checkpoint.starter]
         else:
             runnable_conductor = self._threads[next_checkpoint.starter]
+        return runnable_conductor
 
-        runnable_conductor.start_or_continue(next_checkpoint, last_checkpoint)
+    @classmethod
+    def _get_next_and_last_checkpoint(cls, checkpoints, next_checkpoint_idx):
+        """Return the next checkpoints to hit and the one previous to it
 
-        self._next_checkpoint_idx += 1
-        return next_checkpoint
+        Both checkpoints are set on the same starter
+        """
+        if next_checkpoint_idx >= len(checkpoints):
+            next_checkpoint = None
+        else:
+            next_checkpoint = checkpoints[next_checkpoint_idx]
+
+        last_checkpoint = cls._get_last_thread_checkpoint(
+            next_checkpoint, checkpoints)
+
+        return next_checkpoint, last_checkpoint
 
     @staticmethod
     def _get_last_thread_checkpoint(checkpoint, all_checkpoints):
@@ -164,14 +182,20 @@ class ProfilingThread(threading.Thread):
 
 
 class ThreadConductor(object):
+    """Allows a thread to run intermittently (until it reaches checkpoints) """
     def __init__(self, target, args, kwargs):
+        # We wouldn't want the default re-entrant lock now, would we?
         self.condition = threading.Condition(lock=threading.Lock())
         self.thread = ProfilingThread(
             target=target, args=args, kwargs=kwargs, condition=self.condition)
         self.thread.setDaemon(True)
         self._started = False
 
-    def start_or_continue(self, next_checkpoint, last_checkpoint):
+    def start_or_continue(self, next_checkpoint):
+        """Lets associated thread run until it reaches the :param:`next_checkpoint`
+
+        :param next_checkpoint:
+        """
         self.thread.set_checkpoint(next_checkpoint)
 
         if not self._started:
@@ -182,9 +206,9 @@ class ThreadConductor(object):
             while not self.thread.has_reached_checkpoint(next_checkpoint) and self.thread.is_alive():
                 time.sleep(0.1)
         else:
-            # wait for the thread to hit the last checkpoint (Join)
-            while not self.thread.has_reached_checkpoint(last_checkpoint) and self.thread.is_alive():
-                time.sleep(0.1)
+            # # wait for the thread to hit the last checkpoint (Join)
+            # while not self.thread.has_reached_checkpoint(last_checkpoint) and self.thread.is_alive():
+            #     time.sleep(0.1)
 
             self.condition.acquire()
             # Notify other thread to continue its execution

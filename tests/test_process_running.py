@@ -106,7 +106,7 @@ class TwoThreadsTestCase(unittest.TestCase):
 
         cp1_1 = starter1.add_checkpoint_before(machine1.first_phase)
         cp1_2 = starter1.add_checkpoint_before(machine1.second_phase)
-        cp1_3 = starter1.add_checkpoint_before(machine1.third_phase)
+        cp1_3 = starter1.add_checkpoint_after(machine1.third_phase)
 
         cp2_1 = starter2.add_checkpoint_before(machine2.first_phase)
         cp2_2 = starter2.add_checkpoint_before(machine2.second_phase)
@@ -122,7 +122,7 @@ class TwoThreadsTestCase(unittest.TestCase):
         next(runner)
         self.assertEqual(machine1.steps, [1])
         next(runner)
-        self.assertEqual(machine1.steps, [1, 2])
+        self.assertEqual(machine1.steps, [1, 2, 3])
         next(runner)
         self.assertEqual(machine2.steps, [])
         self.assertEqual(machine1.steps, [1, 2, 3])
@@ -133,7 +133,26 @@ class TwoThreadsTestCase(unittest.TestCase):
         next(runner)
         self.assertEqual(machine2.steps, [1, 2, 3])
 
-        self.fail(
-            "Fix commented tests: switching from thread1 to 2 leaves t1 "
-            "sleeping")
+    def test_when_switching_threads_all_are_run_until_the_end(self):
+        # Time -> ...
+        # Process 1: CP1   CP2   CP3
+        # Process 2:                      CP1   CP2   CP3
+        machine1 = ThreePhaseMachine()
+        machine2 = ThreePhaseMachine()
+        starter1 = ProcessStarter(machine1)
+        starter2 = ProcessStarter(machine2)
 
+        cp1_1 = starter1.add_checkpoint_before(machine1.third_phase)
+
+        cp2_1 = starter2.add_checkpoint_before(machine2.third_phase)
+
+        runner = Runner([starter1, starter2], [cp1_1, cp2_1])
+
+        next(runner)
+        next(runner)
+        self.assertEqual(machine2.steps, [])
+        # Easy enough to fix: need special checkpoints that mark that the
+        # thread has exited BUT we also need to make a decision in this
+        # special non-explicit case. Let's just let the currently running
+        # thread to continue
+        self.assertEqual(machine1.steps, [1, 2, 3])
