@@ -14,6 +14,7 @@ class ProcessStarter(object):
         self.kwargs = kwargs
         self.event = None
         self._terminal_checkpoint = Checkpoint(self, None)
+        self._initial_checkpoint = Checkpoint(self, None)
 
     def add_checkpoint_after(self, callable_):
         """Create and return a checkpoint, set AFTER the callable returns"""
@@ -26,6 +27,44 @@ class ProcessStarter(object):
     def get_terminal_checkpoint(self):
         """Returns a checkpoint that marks the process end"""
         return self._terminal_checkpoint
+
+    def get_initial_checkpoint(self):
+        """Return the initial checkpoint, that marks the process beginning"""
+        return self._initial_checkpoint
+
+
+def generate_checkpoint_order(checkpoints, next_idx):
+    """Iterator, inserts between checkpoints the terminal checkpoints, if
+    threads need to terminate.
+
+    Always returns a pair of checkpoints set on the same starter.
+
+    :param list[Checkpoint] checkpoints: the ordered specified list of checkpoints
+    :param next_idx: the id of the next checkpoint that should be reached
+    :return: tuple (next_checkpoint, last_checkpoint)
+    """
+    if next_idx >= len(checkpoints):
+        raise StopIteration
+
+    if next_idx == 0:
+        yield checkpoints[0], None
+
+    last_checkpoint = checkpoints[next_idx - 1]
+    next_checkpoint = checkpoints[next_idx]
+
+    if last_checkpoint.starter is next_checkpoint.starter:
+        yield next_checkpoint, last_checkpoint
+
+    # p1:  1   2             3       TERMINAL
+    # p2:          1    2            TERMINAL
+    # last = p1c2; next = p2c1
+        # return p2.cp1, None
+
+    # p1:  1    2                  TERMINAL
+    # p2:             1    2       TERMINAL
+    # last = p1c2; next = p2c1
+        # yield p1.TERMINAL, p1c2
+        # yield p2c1; None
 
 
 class Runner(object):
@@ -49,20 +88,30 @@ class Runner(object):
             )
             for starter in starters
         }
+        self._order_generator = generate_checkpoint_order
 
+    # def next(self):
+    #     """Lets the 2 processes run until the next checkpoint is reached """
+    #     next_checkpoint, last_checkpoint = self._get_next_and_last_checkpoint(
+    #         self.checkpoints, self._next_checkpoint_idx
+    #     )
+    #     # TODO - coordination here is required to step over terminal
+    #     # checkpoints. Just need to call _run_single_step for the intermediary
+    #     # checkpoints, and we're done
+    #
+    #     self._run_single_step(last_checkpoint, next_checkpoint)
+    #
+    #     self._next_checkpoint_idx += 1
+    #     return next_checkpoint
     def next(self):
-        """Lets the 2 processes run until the next checkpoint is reached """
-        next_checkpoint, last_checkpoint = self._get_next_and_last_checkpoint(
-            self.checkpoints, self._next_checkpoint_idx
-        )
-        # TODO - coordination here is required to step over terminal
-        # checkpoints. Just need to call _run_single_step for the intermediary
-        # checkpoints, and we're done
+        """Lets the 2 processes run until the next specified checkpoint is reached"""
+        next_specified_checkpoint = self.checkpoints[self._next_checkpoint_idx]
+        last_specified_checkpoint = self.checkpoints[self._next_checkpoint_idx - 1]  # noqa
 
-        self._run_single_step(last_checkpoint, next_checkpoint)
+        for actual_next, actual_last in self._order_generator(
+                self.checkpoints, self._next_checkpoint_idx):
+            pass
 
-        self._next_checkpoint_idx += 1
-        return next_checkpoint
 
     def _run_single_step(self, last_checkpoint, next_checkpoint):
         if next_checkpoint is last_checkpoint is None:
