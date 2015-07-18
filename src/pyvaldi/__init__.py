@@ -14,7 +14,7 @@ class ProcessStarter(object):
         self.kwargs = kwargs
         self.event = None
         self._terminal_checkpoint = Checkpoint(self, None)
-        self._initial_checkpoint = Checkpoint(self, None)
+        self._initial_checkpoint = Checkpoint(self, None, before=True)
 
     def add_checkpoint_after(self, callable_):
         """Create and return a checkpoint, set AFTER the callable returns"""
@@ -33,21 +33,49 @@ class ProcessStarter(object):
         return self._initial_checkpoint
 
 
-def generate_checkpoint_order(checkpoints, next_idx):
-    """Iterator, inserts between checkpoints the terminal checkpoints, if
-    threads need to terminate.
+def get_previous_checkpoint_on_starter(checkpoints, checkpoint_idx):
+    """Return the previous checkpoint on the same starter as this one
+    :param list[Checkpoint] checkpoints: ordered list of checkpoints
+    :param int checkpoint_idx: the index of the current checkpoint
+    :rtype: Checkpoint
+    """
+    starter = checkpoints[checkpoint_idx].starter
+
+    for candidate in reversed(checkpoints[0:checkpoint_idx]):
+        if candidate.starter is starter:
+            return candidate
+
+    return starter.get_initial_checkpoint()
+
+
+def generate_checkpoint_pairs(checkpoints, next_idx):
+    """Between 2 given checkpoints, inserts the implicit initial/ terminal ones
 
     Always returns a pair of checkpoints set on the same starter.
 
-    :param list[Checkpoint] checkpoints: the ordered specified list of checkpoints
-    :param next_idx: the id of the next checkpoint that should be reached
+     switching from 1 to 2, but we're not done with 1
+     p1:  1   2               3          TERM
+     p2:          INIT 1    2            TERM
+     last = p1c2; next = p2c1
+         yield p2.cp1, p2.INITIAL
+
+     switching from 1 to 2, but we're done with 1
+     p1:  1    2                       TERM
+     p2:           INIT   1    2       TERM
+     last = p1c2; next = p2c1
+         yield p1.TERMINAL, p1c2
+         yield p2c1; p2.INITIAL
+
+
+    :param list[Checkpoint] checkpoints: ordered list of checkpoints
+    :param next_idx: the index of the next checkpoint that should be reached
     :return: tuple (next_checkpoint, last_checkpoint)
     """
     if next_idx >= len(checkpoints):
         raise StopIteration
 
     if next_idx == 0:
-        yield checkpoints[0], None
+        yield checkpoints[0], NULL_CHECKPOINT
 
     last_checkpoint = checkpoints[next_idx - 1]
     next_checkpoint = checkpoints[next_idx]
@@ -55,16 +83,22 @@ def generate_checkpoint_order(checkpoints, next_idx):
     if last_checkpoint.starter is next_checkpoint.starter:
         yield next_checkpoint, last_checkpoint
 
-    # p1:  1   2             3       TERMINAL
-    # p2:          1    2            TERMINAL
-    # last = p1c2; next = p2c1
-        # return p2.cp1, None
-
-    # p1:  1    2                  TERMINAL
-    # p2:             1    2       TERMINAL
-    # last = p1c2; next = p2c1
-        # yield p1.TERMINAL, p1c2
-        # yield p2c1; None
+    for checkpoint in checkpoints[next_idx:]:
+        # Not done with the last thread
+        if checkpoint.starter is last_checkpoint.starter:
+            yield (next_checkpoint,
+                   get_previous_checkpoint_on_starter(checkpoints, next_idx))
+            break
+    else:
+        # Done with the last thread. Insert its terminal checkpoint
+        yield (
+            last_checkpoint.starter.get_terminal_checkpoint(),
+            last_checkpoint
+        )
+        yield (
+            next_checkpoint,
+            next_checkpoint.starter.get_initial_checkpoint()
+        )
 
 
 class Runner(object):
@@ -88,7 +122,7 @@ class Runner(object):
             )
             for starter in starters
         }
-        self._order_generator = generate_checkpoint_order
+        self._order_generator = generate_checkpoint_pairs
 
     # def next(self):
     #     """Lets the 2 processes run until the next checkpoint is reached """
@@ -173,9 +207,10 @@ class Checkpoint(object):
         self.before = before
 
     def get_code(self):
-        if not self.callable:
-            return
-        return self.callable.func_code
+        if self.callable:
+            return self.callable.func_code
+
+NULL_CHECKPOINT = Checkpoint(None, None, None)
 
 
 class SleepyProfiler(object):
