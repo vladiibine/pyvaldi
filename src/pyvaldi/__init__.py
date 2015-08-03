@@ -16,13 +16,13 @@ class ProcessStarter(object):
         self._terminal_checkpoint = Checkpoint(self, None)
         self._initial_checkpoint = Checkpoint(self, None, before=True)
 
-    def add_checkpoint_after(self, callable_):
+    def add_checkpoint_after(self, callable_, name=None):
         """Create and return a checkpoint, set AFTER the callable returns"""
-        return Checkpoint(self, callable_)
+        return Checkpoint(self, callable_, name=name)
 
-    def add_checkpoint_before(self, callable_):
+    def add_checkpoint_before(self, callable_, name=None):
         """Create and return a checkpoint, set BEFORE the callable returns"""
-        return Checkpoint(self, callable_, before=True)
+        return Checkpoint(self, callable_, before=True, name=name)
 
     def get_terminal_checkpoint(self):
         """Returns a checkpoint that marks the process end"""
@@ -66,6 +66,19 @@ def generate_checkpoint_pairs(checkpoints, next_idx):
          yield p1.TERMINAL, p1c2
          yield p2c1; p2.INITIAL
 
+     switching back to 1, done with 2
+     p1: 1       2              TERM
+     p2:    1                   TERM
+     last = p2.c1; next = p1.c2
+        yield p2.term, p2.c1
+        yield p1.c2, p1.c1
+
+    switching back to 1, NOT done with 2
+    p1: 1       2        TERM
+    p2:    1         2   TERM
+    last = p2.c1; next = p1.c2
+       yield p1.c2, p1.c1
+
 
     :param list[Checkpoint] checkpoints: ordered list of checkpoints
     :param next_idx: the index of the next checkpoint that should be reached
@@ -82,23 +95,24 @@ def generate_checkpoint_pairs(checkpoints, next_idx):
 
     if last_checkpoint.starter is next_checkpoint.starter:
         yield next_checkpoint, last_checkpoint
-
-    for checkpoint in checkpoints[next_idx:]:
-        # Not done with the last thread
-        if checkpoint.starter is last_checkpoint.starter:
-            yield (next_checkpoint,
-                   get_previous_checkpoint_on_starter(checkpoints, next_idx))
-            break
     else:
-        # Done with the last thread. Insert its terminal checkpoint
-        yield (
-            last_checkpoint.starter.get_terminal_checkpoint(),
-            last_checkpoint
-        )
-        yield (
-            next_checkpoint,
-            next_checkpoint.starter.get_initial_checkpoint()
-        )
+        for checkpoint in checkpoints[next_idx:]:
+            # Not done with the last thread
+            if checkpoint.starter is last_checkpoint.starter:
+                yield (next_checkpoint,
+                       get_previous_checkpoint_on_starter(checkpoints, next_idx))
+                break
+        else:
+            # Done with the last thread. Insert its terminal checkpoint
+            yield (
+                last_checkpoint.starter.get_terminal_checkpoint(),
+                last_checkpoint
+            )
+            yield (
+                next_checkpoint,
+                # next_checkpoint.starter.get_initial_checkpoint(),
+                get_previous_checkpoint_on_starter(checkpoints, next_idx)
+            )
 
 
 class Runner(object):
@@ -201,7 +215,8 @@ class Checkpoint(object):
     The :class:`Runner` will know to pause all the running processes when one
     of them has reached such a checkpoint
     """
-    def __init__(self, starter, callable_, before=False):
+    def __init__(self, starter, callable_, before=False, name=None):
+        self.name = name
         self.starter = starter
         self.callable = callable_
         self.before = before
@@ -209,6 +224,16 @@ class Checkpoint(object):
     def get_code(self):
         if self.callable:
             return self.callable.func_code
+
+    def __repr__(self):
+        # display_name = (u"'{}'".format(self.name)
+        #                 if self.name is not None else u'')
+        display_name = u"'{}'".format(self.name)
+        return u"<CP {name}at {id}>".format(
+            name=display_name, id=id(self))
+
+    __str__ = __repr__
+
 
 NULL_CHECKPOINT = Checkpoint(None, None, None)
 
