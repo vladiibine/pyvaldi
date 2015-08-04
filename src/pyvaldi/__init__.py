@@ -216,26 +216,65 @@ class Checkpoint(object):
     of them has reached such a checkpoint
     """
     def __init__(self, starter, callable_, before=False, name=None):
+        """
+
+        :param ProcessStarter | None starter: The ProcessStarter on which this
+            checkpoint was set
+        :param callable_: Any callable. Will stop before or after it has been
+            called.
+        :param bool | None before: whether to stop before or after the callable
+            was invoked
+        :param str | None name: The name of this checkpoint
+            (for easier debugging)
+        """
         self.name = name
         self.starter = starter
         self.callable = callable_
         self.before = before
 
-    def get_code(self):
-        if self.callable:
-            return self.callable.func_code
+    def should_stop(self, callable_):
+        """
+        :param callable_: a callable to compare to the managed one
+        :rtype: bool
+        """
+        return self.callable.func_code is callable_.func_code
+
+    def _get_display_name(self):
+        return u"'{}'".format(self.name) if self.name is not None else u''
 
     def __repr__(self):
-        # display_name = (u"'{}'".format(self.name)
-        #                 if self.name is not None else u'')
-        display_name = u"'{}'".format(self.name)
         return u"<CP {name}at {id}>".format(
-            name=display_name, id=id(self))
+            name=self._get_display_name(), id=id(self))
 
     __str__ = __repr__
 
 
-NULL_CHECKPOINT = Checkpoint(None, None, None)
+class NullCheckpoint(Checkpoint):
+    """Special 'Null object' type for checkpoints, so as not to abuse `None`
+
+    Used for specifying that there is no checkpoint.
+    """
+    def should_stop(self, callable_):
+        """Should never stop at this checkpoint"""
+        return False
+
+    def __repr__(self):
+        return u"<NULL Checkpoint {name}at {id}>".format(
+            name=self._get_display_name(), id=id(self))
+
+
+class ImplicitCheckpoint(Checkpoint):
+    """Represents the initial/ terminal implicit points for a process"""
+    def should_stop(self, callable_):
+        """Should always stop at such a checkpoint"""
+        return True
+
+    def __repr__(self):
+        return u"<Implicit Checkpoint {name}at {id}>".format(
+            name=self._get_display_name(), id=id(self))
+
+
+NULL_CHECKPOINT = NullCheckpoint(None, None, None)
 
 
 class SleepyProfiler(object):
@@ -255,7 +294,7 @@ class SleepyProfiler(object):
         if current_checkpoint is None:
             return
 
-        if frame.f_code is not current_checkpoint.get_code():
+        if not current_checkpoint.should_stop(frame.f_code):
             return
 
         if ((current_checkpoint.before and action_string == 'call') or
