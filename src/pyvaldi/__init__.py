@@ -13,8 +13,8 @@ class ProcessStarter(object):
         self.args = args
         self.kwargs = kwargs
         self.event = None
-        self._terminal_checkpoint = Checkpoint(self, None)
-        self._initial_checkpoint = Checkpoint(self, None, before=True)
+        self._terminal_checkpoint = ImplicitCheckpoint(self, None)
+        self._initial_checkpoint = ImplicitCheckpoint(self, None, before=True)
 
     def add_checkpoint_after(self, callable_, name=None):
         """Create and return a checkpoint, set AFTER the callable returns"""
@@ -84,11 +84,15 @@ def generate_checkpoint_pairs(checkpoints, next_idx):
     :param next_idx: the index of the next checkpoint that should be reached
     :return: tuple (next_checkpoint, last_checkpoint)
     """
-    if next_idx >= len(checkpoints):
+    if next_idx == len(checkpoints):
+        yield checkpoints[-1].starter.get_terminal_checkpoint(), checkpoints[-1]
         raise StopIteration
 
     if next_idx == 0:
         yield checkpoints[0], NULL_CHECKPOINT
+        raise StopIteration
+
+    if next_idx > len(checkpoints):
         raise StopIteration
 
     last_checkpoint = checkpoints[next_idx - 1]
@@ -112,7 +116,6 @@ def generate_checkpoint_pairs(checkpoints, next_idx):
         )
         yield (
             next_checkpoint,
-            # next_checkpoint.starter.get_initial_checkpoint(),
             get_previous_checkpoint_on_starter(checkpoints, next_idx)
         )
 
@@ -252,6 +255,8 @@ class NullCheckpoint(Checkpoint):
     def __repr__(self):
         return u"<NULL Checkpoint {name}at {id}>".format(
             name=self._get_display_name(), id=id(self))
+
+    __str__ = __repr__
 
 
 class ImplicitCheckpoint(Checkpoint):
