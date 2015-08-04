@@ -89,30 +89,32 @@ def generate_checkpoint_pairs(checkpoints, next_idx):
 
     if next_idx == 0:
         yield checkpoints[0], NULL_CHECKPOINT
+        raise StopIteration
 
     last_checkpoint = checkpoints[next_idx - 1]
     next_checkpoint = checkpoints[next_idx]
 
     if last_checkpoint.starter is next_checkpoint.starter:
         yield next_checkpoint, last_checkpoint
+        raise StopIteration
+
+    for checkpoint in checkpoints[next_idx:]:
+        # Not done with the last thread
+        if checkpoint.starter is last_checkpoint.starter:
+            yield (next_checkpoint,
+                   get_previous_checkpoint_on_starter(checkpoints, next_idx))
+            break
     else:
-        for checkpoint in checkpoints[next_idx:]:
-            # Not done with the last thread
-            if checkpoint.starter is last_checkpoint.starter:
-                yield (next_checkpoint,
-                       get_previous_checkpoint_on_starter(checkpoints, next_idx))
-                break
-        else:
-            # Done with the last thread. Insert its terminal checkpoint
-            yield (
-                last_checkpoint.starter.get_terminal_checkpoint(),
-                last_checkpoint
-            )
-            yield (
-                next_checkpoint,
-                # next_checkpoint.starter.get_initial_checkpoint(),
-                get_previous_checkpoint_on_starter(checkpoints, next_idx)
-            )
+        # Done with the last thread. Insert its terminal checkpoint
+        yield (
+            last_checkpoint.starter.get_terminal_checkpoint(),
+            last_checkpoint
+        )
+        yield (
+            next_checkpoint,
+            # next_checkpoint.starter.get_initial_checkpoint(),
+            get_previous_checkpoint_on_starter(checkpoints, next_idx)
+        )
 
 
 class Runner(object):
@@ -138,32 +140,21 @@ class Runner(object):
         }
         self._order_generator = generate_checkpoint_pairs
 
-    # def next(self):
-    #     """Lets the 2 processes run until the next checkpoint is reached """
-    #     next_checkpoint, last_checkpoint = self._get_next_and_last_checkpoint(
-    #         self.checkpoints, self._next_checkpoint_idx
-    #     )
-    #     # TODO - coordination here is required to step over terminal
-    #     # checkpoints. Just need to call _run_single_step for the intermediary
-    #     # checkpoints, and we're done
-    #
-    #     self._run_single_step(last_checkpoint, next_checkpoint)
-    #
-    #     self._next_checkpoint_idx += 1
-    #     return next_checkpoint
     def next(self):
         """Lets the 2 processes run until the next specified checkpoint is reached"""
-        next_specified_checkpoint = self.checkpoints[self._next_checkpoint_idx]
-        last_specified_checkpoint = self.checkpoints[self._next_checkpoint_idx - 1]  # noqa
+        sentinel = actual_next = object()
 
         for actual_next, actual_last in self._order_generator(
                 self.checkpoints, self._next_checkpoint_idx):
-            pass
+            self._run_single_step(actual_last, actual_next)
 
+        self._next_checkpoint_idx += 1
+        if actual_next is not sentinel:
+            return actual_next
+        else:
+            return NULL_CHECKPOINT
 
     def _run_single_step(self, last_checkpoint, next_checkpoint):
-        if next_checkpoint is last_checkpoint is None:
-            raise StopIteration
         runnable_conductor = self._get_runnable_conductor(
             last_checkpoint, next_checkpoint)
         runnable_conductor.start_or_continue(next_checkpoint)
@@ -232,12 +223,12 @@ class Checkpoint(object):
         self.callable = callable_
         self.before = before
 
-    def should_stop(self, callable_):
+    def should_stop(self, code):
         """
-        :param callable_: a callable to compare to the managed one
+        :param code: a callable to compare to the managed one
         :rtype: bool
         """
-        return self.callable.func_code is callable_.func_code
+        return self.callable.func_code is code
 
     def _get_display_name(self):
         return u"'{}'".format(self.name) if self.name is not None else u''
@@ -254,7 +245,7 @@ class NullCheckpoint(Checkpoint):
 
     Used for specifying that there is no checkpoint.
     """
-    def should_stop(self, callable_):
+    def should_stop(self, code):
         """Should never stop at this checkpoint"""
         return False
 
@@ -265,7 +256,7 @@ class NullCheckpoint(Checkpoint):
 
 class ImplicitCheckpoint(Checkpoint):
     """Represents the initial/ terminal implicit points for a process"""
-    def should_stop(self, callable_):
+    def should_stop(self, code):
         """Should always stop at such a checkpoint"""
         return True
 

@@ -130,9 +130,9 @@ class SingleThreadTestCase(unittest.TestCase):
         machine = ThreePhaseMachine()
 
         starter = ProcessStarter(machine)
-        cp1 = starter.add_checkpoint_before(machine.first_phase)
-        cp2 = starter.add_checkpoint_before(machine.second_phase)
-        cp3 = starter.add_checkpoint_before(machine.third_phase)
+        cp1 = starter.add_checkpoint_before(machine.first_phase, '1-1')
+        cp2 = starter.add_checkpoint_before(machine.second_phase, '1-2')
+        cp3 = starter.add_checkpoint_before(machine.third_phase, '1-3')
 
         runner = Runner([starter], [cp1, cp2, cp3])
 
