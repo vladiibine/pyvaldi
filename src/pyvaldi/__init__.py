@@ -266,8 +266,16 @@ class ImplicitCheckpoint(Checkpoint):
         return True
 
     def __repr__(self):
-        return u"<Implicit Checkpoint {name}at {id}>".format(
-            name=self._get_display_name(), id=id(self))
+        if self.before:
+            subtype = u'Init.'
+        else:
+            subtype = u'Term.'
+        return u"<{subtype} Checkpoint {name}at {id}>".format(
+            name=self._get_display_name(),
+            subtype=subtype,
+            id=id(self))
+
+    __str__ = __repr__
 
 
 NULL_CHECKPOINT = NullCheckpoint(None, None, None)
