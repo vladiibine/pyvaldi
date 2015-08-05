@@ -120,10 +120,54 @@ def generate_checkpoint_pairs(checkpoints, next_idx):
         )
 
 
+def interpolate_implicit_checkpoints(checkpoints):
+    """
+    :param list[Checkpoint] checkpoints: list of user defined checkpoints
+    :return: iterable yielding the same checkpoints and also the implicit
+        initial and terminal ones
+    """
+
+
+class OrderedSet(list):
+    def __init__(self, iterable):
+        proper_elems = []
+        for elem in iterable:
+            if elem not in proper_elems:
+                proper_elems.append(elem)
+        super(OrderedSet, self).__init__(iterable)
+
+
+class ImplicitCheckpointInterpolator(object):
+    """Given a list of user defined checkpoints, adds the implicit ones.
+
+    Implicit means the initial and terminal checkpoints.
+    This is done in order to properly switch between threads.
+    """
+    def __init__(self, checkpoints):
+        self.starters = OrderedSet([cp.starter for cp in checkpoints])
+        self.starter_checkpoints = {
+            starter: sorted(
+                [cp for cp in checkpoints
+                 if cp.starter is starter
+                 and isinstance(cp, ImplicitCheckpoint)]
+            )
+            for starter in self.starters
+        }
+
+    def interpolate(self):
+        for starter, implicits in self.starter_checkpoints:
+            pass
+        pass
+
+
 class Runner(object):
     """Runs the provided process starter objects in parallel, observing the
     checkpoints that were set
     """
+    # Deprecated. Makes is hard to handle terminal nodes that really are at the
+    _order_generator = generate_checkpoint_pairs
+    _get_actual_checkpoints = 0
+
     def __init__(self, starters=None, checkpoints=None):
         """
         :param list[ProcessStarter] starters: a list of process starters
@@ -141,11 +185,12 @@ class Runner(object):
             )
             for starter in starters
         }
-        self._order_generator = generate_checkpoint_pairs
+        # self._order_generator = generate_checkpoint_pairs
 
     def next(self):
         """Lets the 2 processes run until the next specified checkpoint is reached"""
         sentinel = actual_next = object()
+        actual_checkpoints = self._get_actual_checkpoints(self.checkpoints)
 
         for actual_next, actual_last in self._order_generator(
                 self.checkpoints, self._next_checkpoint_idx):
@@ -276,6 +321,14 @@ class ImplicitCheckpoint(Checkpoint):
             id=id(self))
 
     __str__ = __repr__
+
+    def __lt__(self, other):
+        if not isinstance(other, Checkpoint):
+            raise TypeError("Type of {} and {} are not comparable".format(self, other))  # noqa
+        if self.starter is not other.starter:
+            raise ValueError("{} and {} have different starters".format(self, other))
+
+        return self.before > other.before
 
 
 NULL_CHECKPOINT = NullCheckpoint(None, None, None)
