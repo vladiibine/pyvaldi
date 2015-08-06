@@ -153,11 +153,54 @@ class ImplicitCheckpointInterpolator(object):
             )
             for starter in self.starters
         }
+        self.checkpoints = list(checkpoints)
 
     def interpolate(self):
+        """Return a list of checkpoints with all implicit ones present
+
+        :rtype: list[Checkpoint]
+        """
         for starter, implicits in self.starter_checkpoints:
-            pass
-        pass
+            if len(implicits) == 2:
+                continue
+            elif len(implicits) == 1:
+                implicit_checkpoint = implicits[0]
+                missing_checkpoint = ImplicitCheckpoint(
+                    starter=implicit_checkpoint.starter,
+                    callable_=None,
+                    before=not implicit_checkpoint.before,
+                )
+                self.insert_missing(missing_checkpoint, starter, self.checkpoints)  # noqa
+            elif len(implicits) == 0:
+                for before in (True, False):
+                    self.insert_missing(
+                        ImplicitCheckpoint(starter, None, before),
+                        starter,
+                        self.checkpoints
+                    )
+
+        return self.checkpoints
+
+    @staticmethod
+    def insert_missing(missing, starter, checkpoints):
+        """Insert the missing implicit checkpoint in the checkpoint list
+
+        :param ImplicitCheckpoint missing: the missing CP for its starter
+        :param ProcessStarter starter: the starter we were talking about
+        :param list[Checkpoint] checkpoints: the checkpoint list
+        """
+        # Where to insert an initial checkpoint?
+        # > Before the first checkpoint of its starter
+        # > Also a terminal checkpoint should be inserted after the last CP on
+        starter_checkpoints = [cp for cp in checkpoints
+                               if cp.starter is starter]
+
+        if missing.before:
+            first_idx = checkpoints.index(starter_checkpoints[0])
+            checkpoints.insert(first_idx, missing)
+        else:
+            last_idx = checkpoints.index(starter_checkpoints[-1])
+            checkpoints.insert(last_idx + 1, missing)
 
 
 class Runner(object):
@@ -165,7 +208,7 @@ class Runner(object):
     checkpoints that were set
     """
     # Deprecated. Makes is hard to handle terminal nodes that really are at the
-    _order_generator = generate_checkpoint_pairs
+    _order_generator = staticmethod(generate_checkpoint_pairs)
     _get_actual_checkpoints = 0
 
     def __init__(self, starters=None, checkpoints=None):
@@ -190,7 +233,7 @@ class Runner(object):
     def next(self):
         """Lets the 2 processes run until the next specified checkpoint is reached"""
         sentinel = actual_next = object()
-        actual_checkpoints = self._get_actual_checkpoints(self.checkpoints)
+        # actual_checkpoints = self._get_actual_checkpoints(self.checkpoints)
 
         for actual_next, actual_last in self._order_generator(
                 self.checkpoints, self._next_checkpoint_idx):
@@ -330,6 +373,8 @@ class ImplicitCheckpoint(Checkpoint):
 
         return self.before > other.before
 
+    def is_initial(self):
+        return self.before
 
 NULL_CHECKPOINT = NullCheckpoint(None, None, None)
 
