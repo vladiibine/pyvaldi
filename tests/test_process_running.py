@@ -150,7 +150,7 @@ class TwoThreadsTestCase(unittest.TestCase):
 
         next(runner)
         next(runner)
-        self.assertEqual(machine2.steps, [])
+        self.assertEqual(machine2.steps, [1, 2])
         # Easy enough to fix: need special checkpoints that mark that the
         # thread has exited BUT we also need to make a decision in this
         # special non-explicit case. Let's just let the currently running

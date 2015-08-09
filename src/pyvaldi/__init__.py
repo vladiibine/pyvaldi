@@ -351,7 +351,7 @@ class ImplicitCheckpoint(Checkpoint):
     """Represents the initial/ terminal implicit points for a process"""
     def should_stop(self, code):
         """Should always stop at such a checkpoint"""
-        return True
+        return self.before
 
     def __repr__(self):
         if self.before:
