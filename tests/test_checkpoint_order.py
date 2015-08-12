@@ -1,7 +1,8 @@
 import unittest
 
-from pyvaldi import (ProcessStarter, Runner, generate_checkpoint_pairs,
-                     NULL_CHECKPOINT)
+from pyvaldi import (ProcessStarter, Runner,
+                     NULL_CHECKPOINT, ImplicitCheckpointInterpolator,
+                     ImplicitCheckpoint)
 from .artefacts import ThreePhaseMachine
 
 
@@ -43,16 +44,16 @@ class TwoThreadsTestCase(unittest.TestCase):
         machine1 = ThreePhaseMachine()
         machine2 = ThreePhaseMachine()
 
-        starter1 = ProcessStarter(machine1)
-        starter2 = ProcessStarter(machine2)
+        starter1 = ProcessStarter(machine1, 's1')
+        starter2 = ProcessStarter(machine2, 's2')
 
-        cp1_1 = starter1.add_checkpoint_before(machine1.first_phase)
-        cp1_2 = starter1.add_checkpoint_before(machine1.second_phase)
-        cp1_3 = starter1.add_checkpoint_before(machine1.third_phase)
+        cp1_1 = starter1.add_checkpoint_before(machine1.first_phase, '1')
+        cp1_2 = starter1.add_checkpoint_before(machine1.second_phase, '2')
+        cp1_3 = starter1.add_checkpoint_before(machine1.third_phase, '3')
 
-        cp2_1 = starter2.add_checkpoint_before(machine2.first_phase)
-        cp2_2 = starter2.add_checkpoint_before(machine2.second_phase)
-        cp2_3 = starter2.add_checkpoint_before(machine2.third_phase)
+        cp2_1 = starter2.add_checkpoint_before(machine2.first_phase, '1')
+        cp2_2 = starter2.add_checkpoint_before(machine2.second_phase, '2')
+        cp2_3 = starter2.add_checkpoint_before(machine2.third_phase, '3')
 
         runner = Runner(
             [starter1, starter2],
@@ -64,56 +65,6 @@ class TwoThreadsTestCase(unittest.TestCase):
         self.assertIs(next(runner), cp1_3)
         self.assertIs(next(runner), cp2_2)
         self.assertIs(next(runner), cp2_3)
-
-
-class ThreadSwitchingTestCase(unittest.TestCase):
-    """Test what happens when you switch threads """
-    def test_switching_when_not_done_with_previous_thread_initial_yielded(self):
-        # switching from 1 to 2, but we're not done with 1
-        # p1:  1          2         TERM
-        # p2:     INIT 1            TERM
-        # last = p1c2; next = p2c1
-            # return p2.cp1, p2.INITIAL
-        machine1 = ThreePhaseMachine()
-        machine2 = ThreePhaseMachine()
-
-        starter1 = ProcessStarter(machine1)
-        starter2 = ProcessStarter(machine2)
-
-        proc1_cp1 = starter1.add_checkpoint_after(machine1.first_phase)
-        proc2_cp1 = starter2.add_checkpoint_after(machine2.second_phase)
-        proc1_cp2 = starter1.add_checkpoint_after(machine1.third_phase)
-        checkpoints = [proc1_cp1, proc2_cp1, proc1_cp2]
-
-        results = list(generate_checkpoint_pairs(checkpoints, 1))
-
-        proc2_initial = starter2.get_initial_checkpoint()
-
-        self.assertEqual(results, [(proc2_cp1, proc2_initial)])
-
-    def test_switching_when_done_with_previous_thread_terminal_yielded(self):
-        # switching from 1 to 2, and we're done with 1 - will insert
-        # the terminal node for process 1 before switching
-        # p1: 1         ..TERM
-        # p2:      1    ..TERM
-        machine1 = ThreePhaseMachine()
-        machine2 = ThreePhaseMachine()
-
-        starter1 = ProcessStarter(machine1)
-        starter2 = ProcessStarter(machine2)
-
-        proc1_cp1 = starter1.add_checkpoint_after(machine1.first_phase)
-        proc2_cp1 = starter2.add_checkpoint_after(machine2.first_phase)
-
-        checkpoints = [proc1_cp1, proc2_cp1]
-
-        results = list(generate_checkpoint_pairs(checkpoints, 1))
-
-        self.assertEqual(
-            results,
-            [(starter1.get_terminal_checkpoint(), proc1_cp1),
-             (proc2_cp1, starter2.get_initial_checkpoint())]
-        )
 
 
 class SingleThreadTestCase(unittest.TestCase):
@@ -142,4 +93,48 @@ class SingleThreadTestCase(unittest.TestCase):
 
 
 class ImplicitCheckpointInterpolatorTestCase(unittest.TestCase):
-    pass
+    def test_interpolate_implicit_initial_checkpoint_for_single_process(self):
+        machine1 = ThreePhaseMachine()
+        starter1 = ProcessStarter(machine1)
+
+        checkpoints = [starter1.add_checkpoint_after(machine1.second_phase)]
+
+        interpolator = ImplicitCheckpointInterpolator(checkpoints)
+        results = interpolator.interpolate()
+
+        self.assertIsInstance(results[0], ImplicitCheckpoint)
+        self.assertTrue(results[0].is_initial())
+
+    def test_interpolate_implicit_terminal_cp_for_single_process(self):
+        machine1 = ThreePhaseMachine()
+        starter1 = ProcessStarter(machine1)
+
+        checkpoints = [starter1.add_checkpoint_after(machine1.second_phase)]
+
+        interpolator = ImplicitCheckpointInterpolator(checkpoints)
+        results = interpolator.interpolate()
+
+        self.assertIsInstance(results[2], ImplicitCheckpoint)
+        self.assertTrue(results[2].is_terminal())
+
+    def test_initial_cp_for_second_process_comes_after_terminal_of_first(self):
+        machine1 = ThreePhaseMachine()
+        starter1 = ProcessStarter(machine1)
+
+        machine2 = ThreePhaseMachine()
+        starter2 = ProcessStarter(machine2)
+
+        checkpoints = [
+            starter1.add_checkpoint_before(machine1.second_phase),
+            starter2.add_checkpoint_after(machine2.first_phase)
+        ]
+
+        interpolator = ImplicitCheckpointInterpolator(checkpoints)
+        results = interpolator.interpolate()
+
+        self.assertTrue(results[2].is_terminal())
+        self.assertIs(results[2].starter, starter1)
+
+        self.assertTrue(results[3].is_initial())
+        self.assertIs(results[3].starter, starter2)
+

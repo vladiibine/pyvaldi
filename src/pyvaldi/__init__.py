@@ -8,10 +8,18 @@ import time
 
 class ProcessStarter(object):
     """Starts a process, and sets Checkpoints in its lifecycle"""
-    def __init__(self, callable_, *args, **kwargs):
+    def __init__(self, callable_, name="nameless", *args_for_callable, **kwargs_for_callable):
+        """
+        :param callable_:
+        :param str name: The name of this :class:`ProcessStarter`
+        :param args_for_callable:
+        :param kwargs_for_callable:
+        :return:
+        """
+        self.name = name
         self.callable = callable_
-        self.args = args
-        self.kwargs = kwargs
+        self.args = args_for_callable
+        self.kwargs = kwargs_for_callable
         self.event = None
         self._terminal_checkpoint = ImplicitCheckpoint(self, None)
         self._initial_checkpoint = ImplicitCheckpoint(self, None, before=True)
@@ -32,6 +40,11 @@ class ProcessStarter(object):
         """Return the initial checkpoint, that marks the process beginning"""
         return self._initial_checkpoint
 
+    def __repr__(self):
+        return u"<Starter {}>".format(self.name)
+
+    __str__ = __repr__
+
 
 def get_previous_checkpoint_on_starter(checkpoints, checkpoint_idx):
     """Return the previous checkpoint on the same starter as this one
@@ -39,93 +52,17 @@ def get_previous_checkpoint_on_starter(checkpoints, checkpoint_idx):
     :param int checkpoint_idx: the index of the current checkpoint
     :rtype: Checkpoint
     """
+    if checkpoint_idx >= len(checkpoints):
+        return checkpoints[-1].starter.get_terminal_checkpoint()
+
     starter = checkpoints[checkpoint_idx].starter
+
 
     for candidate in reversed(checkpoints[0:checkpoint_idx]):
         if candidate.starter is starter:
             return candidate
 
     return starter.get_initial_checkpoint()
-
-
-def generate_checkpoint_pairs(checkpoints, next_idx):
-    """Between 2 given checkpoints, inserts the implicit initial/ terminal ones
-
-    Always returns a pair of checkpoints set on the same starter.
-
-     switching from 1 to 2, but we're not done with 1
-     p1:  1   2               3          TERM
-     p2:          INIT 1    2            TERM
-     last = p1c2; next = p2c1
-         yield p2.cp1, p2.INITIAL
-
-     switching from 1 to 2, but we're done with 1
-     p1:  1    2                       TERM
-     p2:           INIT   1    2       TERM
-     last = p1c2; next = p2c1
-         yield p1.TERMINAL, p1c2
-         yield p2c1; p2.INITIAL
-
-     switching back to 1, done with 2
-     p1: 1       2              TERM
-     p2:    1                   TERM
-     last = p2.c1; next = p1.c2
-        yield p2.term, p2.c1
-        yield p1.c2, p1.c1
-
-    switching back to 1, NOT done with 2
-    p1: 1       2        TERM
-    p2:    1         2   TERM
-    last = p2.c1; next = p1.c2
-       yield p1.c2, p1.c1
-
-
-    :param list[Checkpoint] checkpoints: ordered list of checkpoints
-    :param next_idx: the index of the next checkpoint that should be reached
-    :return: tuple (next_checkpoint, last_checkpoint)
-    """
-    if next_idx == len(checkpoints):
-        yield checkpoints[-1].starter.get_terminal_checkpoint(), checkpoints[-1]
-        raise StopIteration
-
-    if next_idx == 0:
-        yield checkpoints[0], NULL_CHECKPOINT
-        raise StopIteration
-
-    if next_idx > len(checkpoints):
-        raise StopIteration
-
-    last_checkpoint = checkpoints[next_idx - 1]
-    next_checkpoint = checkpoints[next_idx]
-
-    if last_checkpoint.starter is next_checkpoint.starter:
-        yield next_checkpoint, last_checkpoint
-        raise StopIteration
-
-    for checkpoint in checkpoints[next_idx:]:
-        # Not done with the last thread
-        if checkpoint.starter is last_checkpoint.starter:
-            yield (next_checkpoint,
-                   get_previous_checkpoint_on_starter(checkpoints, next_idx))
-            break
-    else:
-        # Done with the last thread. Insert its terminal checkpoint
-        yield (
-            last_checkpoint.starter.get_terminal_checkpoint(),
-            last_checkpoint
-        )
-        yield (
-            next_checkpoint,
-            get_previous_checkpoint_on_starter(checkpoints, next_idx)
-        )
-
-
-def interpolate_implicit_checkpoints(checkpoints):
-    """
-    :param list[Checkpoint] checkpoints: list of user defined checkpoints
-    :return: iterable yielding the same checkpoints and also the implicit
-        initial and terminal ones
-    """
 
 
 class OrderedSet(list):
@@ -160,7 +97,7 @@ class ImplicitCheckpointInterpolator(object):
 
         :rtype: list[Checkpoint]
         """
-        for starter, implicits in self.starter_checkpoints:
+        for starter, implicits in self.starter_checkpoints.items():
             if len(implicits) == 2:
                 continue
             elif len(implicits) == 1:
@@ -208,7 +145,7 @@ class Runner(object):
     checkpoints that were set
     """
     # Deprecated. Makes is hard to handle terminal nodes that really are at the
-    _order_generator = staticmethod(generate_checkpoint_pairs)
+    # _order_generator = staticmethod(generate_checkpoint_pairs)
     _get_actual_checkpoints = 0
 
     def __init__(self, starters=None, checkpoints=None):
@@ -217,7 +154,7 @@ class Runner(object):
         :param list[Checkpoint] checkpoints: an list of checkpoints
         """
         self.starters = starters
-        self.checkpoints = checkpoints
+        self.user_checkpoints = checkpoints
         self._next_checkpoint_idx = 0
         self._threads = {
             starter: ThreadConductor(
@@ -228,22 +165,29 @@ class Runner(object):
             )
             for starter in starters
         }
-        # self._order_generator = generate_checkpoint_pairs
+        self._checkpoints_including_implicit = (
+            ImplicitCheckpointInterpolator(self.user_checkpoints).interpolate()
+        )
 
     def next(self):
         """Lets the 2 processes run until the next specified checkpoint is reached"""
-        sentinel = actual_next = object()
-        # actual_checkpoints = self._get_actual_checkpoints(self.checkpoints)
+        all_checkpoints = self._checkpoints_including_implicit
 
-        for actual_next, actual_last in self._order_generator(
-                self.checkpoints, self._next_checkpoint_idx):
-            self._run_single_step(actual_last, actual_next)
+        if self._next_checkpoint_idx >= len(all_checkpoints):
+            return
 
+        checkpoint = all_checkpoints[self._next_checkpoint_idx]
         self._next_checkpoint_idx += 1
-        if actual_next is not sentinel:
-            return actual_next
-        else:
-            return NULL_CHECKPOINT
+        while checkpoint not in self.user_checkpoints:
+            last_checkpoint = get_previous_checkpoint_on_starter(
+                all_checkpoints, self._next_checkpoint_idx)
+            self._run_single_step(last_checkpoint, checkpoint)
+            if self._next_checkpoint_idx >= len(all_checkpoints):
+                return
+            checkpoint = all_checkpoints[self._next_checkpoint_idx]
+            self._next_checkpoint_idx += 1
+
+        return checkpoint
 
     def _run_single_step(self, last_checkpoint, next_checkpoint):
         runnable_conductor = self._get_runnable_conductor(
@@ -257,35 +201,6 @@ class Runner(object):
         else:
             runnable_conductor = self._threads[next_checkpoint.starter]
         return runnable_conductor
-
-    @classmethod
-    def _get_next_and_last_checkpoint(cls, checkpoints, next_checkpoint_idx):
-        """Return the next checkpoints to hit and the one previous to it
-
-        Both checkpoints are set on the same starter
-        """
-        if next_checkpoint_idx >= len(checkpoints):
-            next_checkpoint = None
-        else:
-            next_checkpoint = checkpoints[next_checkpoint_idx]
-
-        last_checkpoint = cls._get_last_thread_checkpoint(
-            next_checkpoint, checkpoints)
-
-        return next_checkpoint, last_checkpoint
-
-    @staticmethod
-    def _get_last_thread_checkpoint(checkpoint, all_checkpoints):
-        """Return the last checkpoint on the same thread as this checkpoint"""
-        if checkpoint is None:
-            return all_checkpoints[-1]
-
-        checkpoint_idx = all_checkpoints.index(checkpoint)
-
-        while checkpoint_idx > 0:
-            checkpoint_idx -= 1
-            if checkpoint.starter is all_checkpoints[checkpoint_idx].starter:
-                return all_checkpoints[checkpoint_idx]
 
     def __iter__(self):
         return self
@@ -325,8 +240,14 @@ class Checkpoint(object):
         return u"'{}'".format(self.name) if self.name is not None else u''
 
     def __repr__(self):
-        return u"<CP {name}at {id}>".format(
-            name=self._get_display_name(), id=id(self))
+        return u"<CP {name}of {starter} at {id}>".format(
+            name=self._get_display_name(), id=id(self), starter=self.starter)
+
+    def is_initial(self):
+        return False
+
+    def is_terminal(self):
+        return False
 
     __str__ = __repr__
 
@@ -358,10 +279,12 @@ class ImplicitCheckpoint(Checkpoint):
             subtype = u'Init.'
         else:
             subtype = u'Term.'
-        return u"<{subtype} Checkpoint {name}at {id}>".format(
+        return u"<{subtype} CP {name}of {starter} at {id}>".format(
             name=self._get_display_name(),
             subtype=subtype,
-            id=id(self))
+            id=id(self),
+            starter=self.starter
+        )
 
     __str__ = __repr__
 
@@ -375,6 +298,9 @@ class ImplicitCheckpoint(Checkpoint):
 
     def is_initial(self):
         return self.before
+
+    def is_terminal(self):
+        return not self.before
 
 NULL_CHECKPOINT = NullCheckpoint(None, None, None)
 
