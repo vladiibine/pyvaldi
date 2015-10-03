@@ -87,9 +87,9 @@ class Baton(object):
     A Lock, that knows who should play next
     """
     def __init__(self, checkpoints):
-        self.player_order = self.determine_player_order(checkpoints)
+        self.checkpoint_order = self.determine_checkpoint_order(checkpoints)
 
-    def determine_player_order(self, checkpoints):
+    def determine_checkpoint_order(self, checkpoints):
         """Return a list of players, representing the order they should be
         allowed to play in.
         """
@@ -115,7 +115,7 @@ class Baton(object):
 
         # Merge stage...
         result_checkpoints = []
-        for idx, reference_cp in enumerate(checkpoints):
+        for reference_cp in checkpoints:
             player_cps = actual_player_cps[reference_cp.player]
             result_checkpoints.extend(
                 player_cps[0:player_cps.index(reference_cp) + 1])
@@ -126,13 +126,47 @@ class Baton(object):
                 result_checkpoints.append(player_cps[0])
 
         # the order in which the players will be allowed to play
-        return [cp.player for cp in result_checkpoints]
+        return result_checkpoints
 
     def ask_for_permission(self, player):
         pass
 
     def yield_permission(self, player):
         pass
+
+
+class TokenChainLock(object):
+    """A collection of locks, that can be acquired and released only in a
+    specific order, only using a specific token
+    """
+    def __init__(self, tokens):
+        self.tokens = tokens
+        self.token_idx = 0
+        self.events = [(token, threading.Event()) for token in tokens]
+        self.event_dict = dict(self.events)
+        # leave first event acquirable
+        self.events[0][1].set()
+        self.release_lock = threading.Lock()
+
+    def acquire(self, token):
+        self.event_dict[token].wait()
+
+    def release(self, token):
+        # protection for when incrementing and setting the events
+        self.release_lock.acquire()
+        # protection against wrong token releasing the lock
+        if token is not self.events[self.token_idx][1]:
+            self.release_lock.release()
+            raise threading.ThreadError(
+                "At this time, releasing the lock can only be done with "
+                "token {}".format(str(self.events[self.token_idx])))
+        if self.token_idx + 1 >= len(self.events):
+            self.release_lock.release()
+            return
+
+        self.token_idx += 1
+        self.events[self.token_idx][1].set()
+        self.release_lock.release()
 
 
 class RhythmProfiler(object):

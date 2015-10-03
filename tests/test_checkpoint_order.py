@@ -95,19 +95,21 @@ class BatonCheckpointOrderTestCase(unittest.TestCase):
     def test_empty_checkpoint_list_yields_empty_player_order(self):
         baton = Baton([])
 
-        assert baton.player_order == []
+        assert baton.checkpoint_order == []
 
     def test_single_checkpoint_generates_single_player_list(self):
         player = ProcessPlayer(None)
         baton = Baton([Checkpoint(player, 1)])
 
-        assert baton.player_order == [player] * 3
+        order = [cp.player for cp in baton.checkpoint_order]
+        assert order == [player] * 3
 
     def test_multiple_checkpoints_single_player(self):
         player = ProcessPlayer(None)
         baton = Baton([Checkpoint(player, 1), Checkpoint(player, 2)])
 
-        assert baton.player_order == [player] * 4
+        order = [cp.player for cp in baton.checkpoint_order]
+        assert order == [player] * 4
 
     def test_2_players_each_with_1_checkpoint(self):
         player1 = ProcessPlayer(None, name='p1')
@@ -115,7 +117,8 @@ class BatonCheckpointOrderTestCase(unittest.TestCase):
 
         baton = Baton([Checkpoint(player1, 0), Checkpoint(player2, 0)])
 
-        assert baton.player_order == [player1] * 3 + [player2] * 3
+        order = [cp.player for cp in baton.checkpoint_order]
+        assert order == [player1] * 3 + [player2] * 3
 
     def test_2_players_with_2_and_1_checkpoint_respectively_non_mixed(self):
         player1 = ProcessPlayer(None, name='p1')
@@ -126,7 +129,8 @@ class BatonCheckpointOrderTestCase(unittest.TestCase):
             Checkpoint(player2, 0)]
         )
 
-        assert baton.player_order == [player1] * 4 + [player2] * 3
+        order = [cp.player for cp in baton.checkpoint_order]
+        assert order == [player1] * 4 + [player2] * 3
 
     def test_2_players_with_multiple_checkpoints_mixed(self):
         p1 = ProcessPlayer(None, name='p1')
@@ -137,7 +141,8 @@ class BatonCheckpointOrderTestCase(unittest.TestCase):
             Checkpoint(p1, 0), Checkpoint(p2, 0)
         ])
 
-        assert baton.player_order == [p1] * 2 + [p2] * 2 + [p1] * 2 + [p2] * 2
+        order = [cp.player for cp in baton.checkpoint_order]
+        assert order == [p1] * 2 + [p2] * 2 + [p1] * 2 + [p2] * 2
 
     def test_4_players_with_multiple_checkpoints_mixed(self):
         p1 = ProcessPlayer(None, name='p1')
@@ -148,7 +153,8 @@ class BatonCheckpointOrderTestCase(unittest.TestCase):
         CP = Checkpoint
         baton = Baton([CP(p1, 0), CP(p2, 0), CP(p3, 0), CP(p4, 0)] * 3)
 
-        assert baton.player_order == (
+        order = [cp.player for cp in baton.checkpoint_order]
+        assert order == (
             [p1] * 2 + [p2] * 2 + [p3] * 2 + [p4] * 2 +
             [p1] * 1 + [p2] * 1 + [p3] * 1 + [p4] * 1 +
             [p1] * 2 + [p2] * 2 + [p3] * 2 + [p4] * 2
