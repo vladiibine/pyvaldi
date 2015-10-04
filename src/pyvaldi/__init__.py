@@ -90,8 +90,11 @@ class ProcessConductor(object):
                 if note is implicit_note:
                     self.note_idx += 1
                     self.implicit_note_idx += 1
-                    self.baton.yield_permission(note)
-                    self.baton.wait_acknowledgement(note)
+                    # TODO - actually, when reaching a checkpoint it shouldn't
+                    # automatically release the lock. but without the next
+                    # lines, all hell breaks loose
+                    # self.baton.yield_permission(note)
+                    # self.baton.wait_acknowledgement(note)
                     return notes[self.note_idx - 1]
                 # when the notes differ
                 else:
@@ -240,11 +243,15 @@ class RhythmProfiler(object):
         # thread = threading.current_thread()
         # print("PROFILER: {} func: {} action: {}".format(thread.name, frame.f_code.co_name, action_string))
         # log_lock.release()
+        print(frame.f_code.co_name, action_string)
 
         if (action_string == 'call' and current_cp.before or
                 action_string == 'return' and not current_cp.before):
             if current_cp.is_reached(frame.f_code):
+                self.baton.wait_for_permission(current_cp)
                 self.baton.acknowledge_checkpoint(current_cp)
+                # print('asdf', current_cp)
+                # import  time; time.sleep(1)
 
                 self.checkpoint_idx += 1
                 if self.checkpoint_idx >= len(self.checkpoints):

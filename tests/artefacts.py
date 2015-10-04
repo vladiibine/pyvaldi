@@ -9,6 +9,7 @@ class ThreePhaseMachine(object):
         self.steps.append(2)
 
     def third_phase(self):
+        print('third phase!!!!!!')
         self.steps.append(3)
 
     def __call__(self, *args, **kwargs):
