@@ -91,6 +91,7 @@ class ProcessConductor(object):
                     self.note_idx += 1
                     self.implicit_note_idx += 1
                     self.baton.yield_permission(note)
+                    self.baton.wait_acknowledgement(note)
                     return notes[self.note_idx - 1]
                 # when the notes differ
                 else:
