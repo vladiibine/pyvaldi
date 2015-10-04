@@ -9,14 +9,14 @@ class SingleThreadTestCase(unittest.TestCase):
     def test_thread_state_changes_after_each_checkpoint(self):
         machine = ThreePhaseMachine()
 
-        starter = ProcessPlayer(machine)
+        player = ProcessPlayer(machine)
 
-        cp1 = starter.add_checkpoint_before(machine.first_phase)
-        cp2 = starter.add_checkpoint_before(machine.second_phase)
-        cp3 = starter.add_checkpoint_before(machine.third_phase)
-        cp4 = starter.add_checkpoint_after(machine.third_phase)
+        cp1 = player.add_checkpoint_before(machine.first_phase)
+        cp2 = player.add_checkpoint_before(machine.second_phase)
+        cp3 = player.add_checkpoint_before(machine.third_phase)
+        cp4 = player.add_checkpoint_after(machine.third_phase)
 
-        conductor = ProcessConductor([starter], [cp1, cp2, cp3, cp4])
+        conductor = ProcessConductor([player], [cp1, cp2, cp3, cp4])
 
         self.assertEqual(machine.steps, [])
         next(conductor)
@@ -30,32 +30,32 @@ class SingleThreadTestCase(unittest.TestCase):
 
     def test_run_to_first_checkpoint_before_method(self):
         machine = ThreePhaseMachine()
-        starter = ProcessPlayer(machine)
-        cp = starter.add_checkpoint_before(machine.third_phase)
+        player = ProcessPlayer(machine)
+        cp = player.add_checkpoint_before(machine.third_phase)
 
-        conductor = ProcessConductor([starter], [cp])
+        conductor = ProcessConductor([player], [cp])
 
         next(conductor)
         self.assertEqual(machine.steps, [1, 2])
 
     def test_run_to_first_checkpoint_after_method(self):
         machine = ThreePhaseMachine()
-        starter = ProcessPlayer(machine)
-        cp = starter.add_checkpoint_after(machine.second_phase)
+        player = ProcessPlayer(machine)
+        cp = player.add_checkpoint_after(machine.second_phase)
 
-        conductor = ProcessConductor([starter], [cp])
+        conductor = ProcessConductor([player], [cp])
 
         next(conductor)
         self.assertEqual(machine.steps, [1, 2])
 
     def test_second_checkpoint_is_reached(self):
         machine = ThreePhaseMachine()
-        starter = ProcessPlayer(machine)
+        player = ProcessPlayer(machine)
 
-        cp1 = starter.add_checkpoint_before(machine.second_phase)
-        cp2 = starter.add_checkpoint_before(machine.third_phase)
+        cp1 = player.add_checkpoint_before(machine.second_phase)
+        cp2 = player.add_checkpoint_before(machine.third_phase)
 
-        conductor = ProcessConductor([starter], [cp1, cp2])
+        conductor = ProcessConductor([player], [cp1, cp2])
 
         next(conductor)
         self.assertEqual(machine.steps, [1])
@@ -64,11 +64,11 @@ class SingleThreadTestCase(unittest.TestCase):
 
     def test_continue_until_the_end(self):
         machine = ThreePhaseMachine()
-        starter = ProcessPlayer(machine)
+        player = ProcessPlayer(machine)
 
-        cp1 = starter.add_checkpoint_before(machine.third_phase)
+        cp1 = player.add_checkpoint_before(machine.third_phase)
 
-        conductor = ProcessConductor([starter], [cp1])
+        conductor = ProcessConductor([player], [cp1])
         next(conductor)
         next(conductor)
 
