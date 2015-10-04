@@ -1,7 +1,6 @@
 import pkg_resources
 import threading
 import sys
-import time
 
 try:
     __version__ = pkg_resources.get_distribution('pyvaldi').version
@@ -20,9 +19,7 @@ class ProcessPlayer(object):
         :return:
         """
         self.name = name
-        self.callable = callable_
-        self.args = args_for_callable
-        self.kwargs = kwargs_for_callable
+        self.music_sheet = None
         self._terminal_checkpoint = ImplicitCheckpoint(self, None)
         self._initial_checkpoint = ImplicitCheckpoint(self, None, before=True)
         self.instrument = InstrumentedThread(
@@ -44,7 +41,8 @@ class ProcessPlayer(object):
         """Return the initial checkpoint, that marks the process beginning"""
         return self._initial_checkpoint
 
-    def play(self, baton):
+    def play(self, music_sheet, baton):
+        self.music_sheet = music_sheet
         self.instrument.tune(baton, self)
         self.instrument.start()
 
@@ -62,36 +60,59 @@ class ProcessConductor(object):
     def __init__(self, players=None, checkpoints=None):
         """
         :param list[ProcessPlayer] players: a list of process players
-        :param list[Checkpoint] checkpoints: an list of checkpoints
+        :param list[Checkpoint] checkpoints: an list of checkpoints (notes)
         """
         self.players = players
         self.checkpoints = checkpoints
 
-        self.baton = Baton(checkpoints)
+        self.note_idx = 0
+        self.implicit_note_idx = 0
+
+        self.music_sheet = MusicSheet(checkpoints)
+        self.baton = Baton(self.music_sheet.checkpoint_order)
+
         for player in players:
-            player.play(self.baton)
-
-
+            player.play(self.music_sheet.player_checkpoints(player), self.baton)
 
     def next(self):
         """Lets the 2 processes run until the next specified checkpoint is reached"""
-        pass
+        notes = self.checkpoints
+        implicit_notes = self.music_sheet.checkpoint_order
+
+        while self.note_idx < len(notes):
+            while self.implicit_note_idx < len(implicit_notes):
+                note = notes[self.note_idx]
+                implicit_note = implicit_notes[self.implicit_note_idx]
+                # when notes are the same
+                if note is implicit_note:
+                    self.note_idx += 1
+                    self.implicit_note_idx += 1
+                    return notes[self.note_idx - 1]
+                # when the notes differ
+                else:
+                    self.baton.yield_permission(implicit_note)
+                    # when this returns, the checkpoint has been reached!!!
+                    self.baton.wait_acknowledgement(implicit_note)
+                    self.implicit_note_idx += 1
 
     def __iter__(self):
         return self
 
 
-class Baton(object):
-    """The Conductor's instrument for synchronizing the players.
-
-    A Lock, that knows who should play next
+class MusicSheet(object):
+    """Determine the order in which checkpoints should be reached
     """
     def __init__(self, checkpoints):
         self.checkpoint_order = self.determine_checkpoint_order(checkpoints)
 
+    def player_checkpoints(self, player):
+        return [cp for cp in self.checkpoint_order if cp.player is player]
+
     def determine_checkpoint_order(self, checkpoints):
         """Return a list of players, representing the order they should be
         allowed to play in.
+
+        :rtype: list[Checkpoint]
         """
         # We'll receive a list of checkpoints...
         # MAYBE containing the implicit checkpoints already
@@ -109,9 +130,9 @@ class Baton(object):
         actual_player_cps = {}  # {player: list[Checkpoints]}
         for player in players:
             actual_player_cps[player] = (
-                [ImplicitCheckpoint(player, before=True)] +
+                [player.get_initial_checkpoint()] +
                 list(raw_player_cps[player]) +
-                [ImplicitCheckpoint(player)])
+                [player.get_terminal_checkpoint()])
 
         # Merge stage...
         result_checkpoints = []
@@ -128,30 +149,42 @@ class Baton(object):
         # the order in which the players will be allowed to play
         return result_checkpoints
 
-    def ask_for_permission(self, player):
-        pass
 
-    def yield_permission(self, player):
-        pass
+class Baton(object):
+    """The Conductor's instrument for synchronizing the players.
+    """
+    def __init__(self, checkpoint_order):
+        self.player_event = CascadingEventGroup(checkpoint_order)
+        self.conductor_event = CascadingEventGroup(checkpoint_order)
+
+    def ask_for_permission(self, checkpoint):
+        self.player_event.wait_on(checkpoint)
+
+    def yield_permission(self, checkpoint):
+        self.player_event.done_with(checkpoint)
+
+    def wait_acknowledgement(self, checkpoint):
+        self.conductor_event.wait_on(checkpoint)
+
+    def acknowledge_checkpoint(self, checkpoint):
+        self.conductor_event.done_with(checkpoint)
 
 
-class TokenChainLock(object):
-    """A collection of locks, that can be acquired and released only in a
-    specific order, only using a specific token
+class CascadingEventGroup(object):
+    """A collection of events, that can only be set in the order specified by
+    the token list
     """
     def __init__(self, tokens):
         self.tokens = tokens
         self.token_idx = 0
         self.events = [(token, threading.Event()) for token in tokens]
         self.event_dict = dict(self.events)
-        # leave first event acquirable
-        self.events[0][1].set()
         self.release_lock = threading.Lock()
 
-    def acquire(self, token):
+    def wait_on(self, token):
         self.event_dict[token].wait()
 
-    def release(self, token):
+    def done_with(self, token):
         # protection for when incrementing and setting the events
         self.release_lock.acquire()
         # protection against wrong token releasing the lock
@@ -172,15 +205,21 @@ class TokenChainLock(object):
 class RhythmProfiler(object):
     def __init__(self):
         self.baton = None
-        self.player = None
+        self.checkpoints = None
+        self.checkpoint_idx = 0
 
     def profile(self, frame, action_string, whatever):
-        # IF CHECKPOINT REACKED
+        current_cp = self.checkpoints[self.checkpoint_idx]
+
+
+        if current_cp.should_stop(frame.f_code):
+            pass
+        # IF CHECKPOINT REACHED
         # if entering, ask for permission
-        self.baton.wait_for_permission(self.player)
+        self.baton.ask_for_permission(current_cp)
 
         # if returning, yield permission
-        self.baton.yield_permission(self.player)
+        self.baton.yield_permission()
 
 
     # def __call__(self, frame, action_string, dunno):
@@ -214,30 +253,33 @@ class InstrumentedThread(threading.Thread):
         self.baton = None
         self.player = None
 
-    def tune(self, baton, player):
+    def tune(self, baton, checkpoints):
         self.profiler.baton = baton
-        self.profiler.player = player
+        # the profiler handles the regular checkpoints, and
+        # the thread - the implicit ones
+        self.profiler.checkpoints = [
+            cp for cp in checkpoints if not isinstance(cp, ImplicitCheckpoint)]
         self.baton = baton
 
     def run(self):
         sys.setprofile(self.profiler.profile)
 
         # Check the initial checkpoint. Decide the order in which players start
-        self.baton.wait_for_permission(self.player)
-        self.baton.yield_permission(self.player)
+        self.baton.wait_for_permission(self.player.get_initial_checkpoint())
+        self.baton.yield_permission()
 
         super(InstrumentedThread, self).run()
 
         # Allows a player to finish, before allowing new one to start.
-        self.baton.wait_for_permission(self.player)
-        self.baton.yield_permission(self.player)
+        self.baton.wait_for_permission(self.player.get.terminal_checkpoint())
+        self.baton.yield_permission()
 
 
 class Checkpoint(object):
     """Represents an instance in the life of a process.
 
     The :class:`ProcessPlayer` will know to pause all the running processes
-    when one of them has reached such a checkpoint
+    when one of them have reached such a checkpoint
     """
     def __init__(self, player, callable_, before=False, name=None):
         """

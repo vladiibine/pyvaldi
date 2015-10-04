@@ -1,6 +1,6 @@
 import unittest
 
-from pyvaldi import (ProcessPlayer, ProcessConductor, Baton, Checkpoint,
+from pyvaldi import (ProcessPlayer, ProcessConductor, MusicSheet, Checkpoint,
                      ImplicitCheckpoint)
 from .artefacts import ThreePhaseMachine
 
@@ -93,55 +93,55 @@ class SingleThreadTestCase(unittest.TestCase):
 
 class BatonCheckpointOrderTestCase(unittest.TestCase):
     def test_empty_checkpoint_list_yields_empty_player_order(self):
-        baton = Baton([])
+        sheet = MusicSheet([])
 
-        assert baton.checkpoint_order == []
+        assert sheet.checkpoint_order == []
 
     def test_single_checkpoint_generates_single_player_list(self):
         player = ProcessPlayer(None)
-        baton = Baton([Checkpoint(player, 1)])
+        sheet = MusicSheet([Checkpoint(player, 1)])
 
-        order = [cp.player for cp in baton.checkpoint_order]
+        order = [cp.player for cp in sheet.checkpoint_order]
         assert order == [player] * 3
 
     def test_multiple_checkpoints_single_player(self):
         player = ProcessPlayer(None)
-        baton = Baton([Checkpoint(player, 1), Checkpoint(player, 2)])
+        sheet = MusicSheet([Checkpoint(player, 1), Checkpoint(player, 2)])
 
-        order = [cp.player for cp in baton.checkpoint_order]
+        order = [cp.player for cp in sheet.checkpoint_order]
         assert order == [player] * 4
 
     def test_2_players_each_with_1_checkpoint(self):
         player1 = ProcessPlayer(None, name='p1')
         player2 = ProcessPlayer(None, name='p2')
 
-        baton = Baton([Checkpoint(player1, 0), Checkpoint(player2, 0)])
+        sheet = MusicSheet([Checkpoint(player1, 0), Checkpoint(player2, 0)])
 
-        order = [cp.player for cp in baton.checkpoint_order]
+        order = [cp.player for cp in sheet.checkpoint_order]
         assert order == [player1] * 3 + [player2] * 3
 
     def test_2_players_with_2_and_1_checkpoint_respectively_non_mixed(self):
         player1 = ProcessPlayer(None, name='p1')
         player2 = ProcessPlayer(None, name='p2')
 
-        baton = Baton([
+        sheet = MusicSheet([
             Checkpoint(player1, 0), Checkpoint(player1, 0),
             Checkpoint(player2, 0)]
         )
 
-        order = [cp.player for cp in baton.checkpoint_order]
+        order = [cp.player for cp in sheet.checkpoint_order]
         assert order == [player1] * 4 + [player2] * 3
 
     def test_2_players_with_multiple_checkpoints_mixed(self):
         p1 = ProcessPlayer(None, name='p1')
         p2 = ProcessPlayer(None, name='p2')
 
-        baton = Baton([
+        sheet = MusicSheet([
             Checkpoint(p1, 0), Checkpoint(p2, 0),
             Checkpoint(p1, 0), Checkpoint(p2, 0)
         ])
 
-        order = [cp.player for cp in baton.checkpoint_order]
+        order = [cp.player for cp in sheet.checkpoint_order]
         assert order == [p1] * 2 + [p2] * 2 + [p1] * 2 + [p2] * 2
 
     def test_4_players_with_multiple_checkpoints_mixed(self):
@@ -151,9 +151,9 @@ class BatonCheckpointOrderTestCase(unittest.TestCase):
         p4 = ProcessPlayer(None, name='p4')
         
         CP = Checkpoint
-        baton = Baton([CP(p1, 0), CP(p2, 0), CP(p3, 0), CP(p4, 0)] * 3)
+        sheet = MusicSheet([CP(p1, 0), CP(p2, 0), CP(p3, 0), CP(p4, 0)] * 3)
 
-        order = [cp.player for cp in baton.checkpoint_order]
+        order = [cp.player for cp in sheet.checkpoint_order]
         assert order == (
             [p1] * 2 + [p2] * 2 + [p3] * 2 + [p4] * 2 +
             [p1] * 1 + [p2] * 1 + [p3] * 1 + [p4] * 1 +
