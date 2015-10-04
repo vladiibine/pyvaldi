@@ -16,16 +16,16 @@ class SingleThreadTestCase(unittest.TestCase):
         cp3 = starter.add_checkpoint_before(machine.third_phase)
         cp4 = starter.add_checkpoint_after(machine.third_phase)
 
-        runner = ProcessConductor([starter], [cp1, cp2, cp3, cp4])
+        conductor = ProcessConductor([starter], [cp1, cp2, cp3, cp4])
 
         self.assertEqual(machine.steps, [])
-        next(runner)
+        next(conductor)
         self.assertEqual(machine.steps, [])
-        next(runner)
+        next(conductor)
         self.assertEqual(machine.steps, [1])
-        next(runner)
+        next(conductor)
         self.assertEqual(machine.steps, [1, 2])
-        next(runner)
+        next(conductor)
         self.assertEqual(machine.steps, [1, 2, 3])
 
     def test_run_to_first_checkpoint_before_method(self):
@@ -33,9 +33,9 @@ class SingleThreadTestCase(unittest.TestCase):
         starter = ProcessPlayer(machine)
         cp = starter.add_checkpoint_before(machine.third_phase)
 
-        runner = ProcessConductor([starter], [cp])
+        conductor = ProcessConductor([starter], [cp])
 
-        next(runner)
+        next(conductor)
         self.assertEqual(machine.steps, [1, 2])
 
     def test_run_to_first_checkpoint_after_method(self):
@@ -43,9 +43,9 @@ class SingleThreadTestCase(unittest.TestCase):
         starter = ProcessPlayer(machine)
         cp = starter.add_checkpoint_after(machine.second_phase)
 
-        runner = ProcessConductor([starter], [cp])
+        conductor = ProcessConductor([starter], [cp])
 
-        next(runner)
+        next(conductor)
         self.assertEqual(machine.steps, [1, 2])
 
     def test_second_checkpoint_is_reached(self):
@@ -55,11 +55,11 @@ class SingleThreadTestCase(unittest.TestCase):
         cp1 = starter.add_checkpoint_before(machine.second_phase)
         cp2 = starter.add_checkpoint_before(machine.third_phase)
 
-        runner = ProcessConductor([starter], [cp1, cp2])
+        conductor = ProcessConductor([starter], [cp1, cp2])
 
-        next(runner)
+        next(conductor)
         self.assertEqual(machine.steps, [1])
-        next(runner)
+        next(conductor)
         self.assertEqual(machine.steps, [1, 2])
 
     def test_continue_until_the_end(self):
@@ -68,9 +68,9 @@ class SingleThreadTestCase(unittest.TestCase):
 
         cp1 = starter.add_checkpoint_before(machine.third_phase)
 
-        runner = ProcessConductor([starter], [cp1])
-        next(runner)
-        next(runner)
+        conductor = ProcessConductor([starter], [cp1])
+        next(conductor)
+        next(conductor)
 
         self.assertEqual(machine.steps, [1, 2, 3])
 
@@ -86,13 +86,13 @@ class TwoThreadsTestCase(unittest.TestCase):
         second_starter = ProcessPlayer(second_machine)
         cp2 = second_starter.add_checkpoint_before(second_machine.first_phase)
 
-        runner = ProcessConductor([first_starter, second_starter], [cp1, cp2])
+        conductor = ProcessConductor([first_starter, second_starter], [cp1, cp2])
 
-        self.assertIs(next(runner), cp1)
+        self.assertIs(next(conductor), cp1)
         self.assertEqual(first_machine.steps, [1, 2, 3])
         self.assertEqual(second_machine.steps, [])
-        self.assertIs(next(runner), cp2)
-        next(runner)
+        self.assertIs(next(conductor), cp2)
+        next(conductor)
         self.assertEqual(second_machine.steps, [1, 2, 3])
 
     def test_simple_order_for_2_processes(self):
@@ -112,25 +112,25 @@ class TwoThreadsTestCase(unittest.TestCase):
         cp2_2 = starter2.add_checkpoint_before(machine2.second_phase)
         cp2_3 = starter2.add_checkpoint_before(machine2.third_phase)
 
-        runner = ProcessConductor(
+        conductor = ProcessConductor(
             [starter1, starter2],
             [cp1_1, cp1_2, cp1_3, cp2_1, cp2_2, cp2_3]
         )
 
-        next(runner)
+        next(conductor)
         self.assertEqual(machine1.steps, [])
-        next(runner)
+        next(conductor)
         self.assertEqual(machine1.steps, [1])
-        next(runner)
+        next(conductor)
         self.assertEqual(machine1.steps, [1, 2, 3])
-        next(runner)
+        next(conductor)
         self.assertEqual(machine2.steps, [])
         self.assertEqual(machine1.steps, [1, 2, 3])
-        next(runner)
+        next(conductor)
         self.assertEqual(machine2.steps, [1])
-        next(runner)
+        next(conductor)
         self.assertEqual(machine2.steps, [1, 2])
-        next(runner)
+        next(conductor)
         self.assertEqual(machine2.steps, [1, 2, 3])
 
     def test_when_switching_threads_all_are_run_until_the_end(self):
@@ -146,10 +146,10 @@ class TwoThreadsTestCase(unittest.TestCase):
 
         cp2_1 = starter2.add_checkpoint_before(machine2.third_phase)
 
-        runner = ProcessConductor([starter1, starter2], [cp1_1, cp2_1])
+        conductor = ProcessConductor([starter1, starter2], [cp1_1, cp2_1])
 
-        next(runner)
-        next(runner)
+        next(conductor)
+        next(conductor)
         self.assertEqual(machine2.steps, [1, 2])
         # Easy enough to fix: need special checkpoints that mark that the
         # thread has exited BUT we also need to make a decision in this

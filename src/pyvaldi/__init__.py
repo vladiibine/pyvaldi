@@ -7,6 +7,9 @@ try:
 except pkg_resources.DistributionNotFound:
     pass
 
+log_lock = threading.Lock()
+from .stacktracer import trace_start
+trace_start('/tmp/trace')
 
 class ProcessPlayer(object):
     """Starts a process, and sets Checkpoints in its lifecycle"""
@@ -153,20 +156,32 @@ class MusicSheet(object):
 class Baton(object):
     """The Conductor's instrument for synchronizing the players.
     """
+    def log(self, cp):
+        log_lock.acquire()
+        import inspect
+        func_name = inspect.currentframe().f_back.f_code.co_name
+        print("{} in {} waiting on {}".format(threading.current_thread().name, func_name, cp))
+        log_lock.release()
+
     def __init__(self, checkpoint_order):
-        self.player_event = CascadingEventGroup(checkpoint_order)
-        self.conductor_event = CascadingEventGroup(checkpoint_order)
+        self.player_event = CascadingEventGroup(checkpoint_order, 'player evt.')
+        self.conductor_event = CascadingEventGroup(checkpoint_order, 'conductor evt')
+        self.log_lock = threading.Lock()
 
     def wait_for_permission(self, checkpoint):
+        # self.log(checkpoint)
         self.player_event.wait_on(checkpoint)
 
     def yield_permission(self, checkpoint):
+        # self.log(checkpoint)
         self.player_event.done_with(checkpoint)
 
     def wait_acknowledgement(self, checkpoint):
+        # self.log(checkpoint)
         self.conductor_event.wait_on(checkpoint)
 
     def acknowledge_checkpoint(self, checkpoint):
+        # self.log(checkpoint)
         self.conductor_event.done_with(checkpoint)
 
 
@@ -174,8 +189,10 @@ class CascadingEventGroup(object):
     """A collection of events, that can only be set in the order specified by
     the token list
     """
-    def __init__(self, tokens):
+    def __init__(self, tokens, name=None):
         self.tokens = tokens
+        self.name = name
+
         self.token_idx = 0
         self.events = [(token, threading.Event()) for token in tokens]
         self.event_dict = dict(self.events)
@@ -188,18 +205,21 @@ class CascadingEventGroup(object):
         # protection for when incrementing and setting the events
         self.release_lock.acquire()
         # protection against wrong token releasing the lock
-        if token is not self.events[self.token_idx][1]:
+        if token is not self.events[self.token_idx][0]:
             self.release_lock.release()
             raise threading.ThreadError(
                 "At this time, releasing the lock can only be done with "
-                "token {}".format(str(self.events[self.token_idx])))
+                "token {}".format(str(self.events[self.token_idx][0])))
         if self.token_idx + 1 >= len(self.events):
             self.release_lock.release()
             return
 
         self.token_idx += 1
-        self.events[self.token_idx][1].set()
+        self.events[self.token_idx - 1][1].set()
         self.release_lock.release()
+
+    def __repr__(self):
+        return u"<CEG {}>".format(self.name if self.name else '')
 
 
 class RhythmProfiler(object):
@@ -209,7 +229,15 @@ class RhythmProfiler(object):
         self.checkpoint_idx = 0
 
     def profile(self, frame, action_string, whatever):
+        if self.checkpoint_idx >= len(self.checkpoints):
+            return
+
         current_cp = self.checkpoints[self.checkpoint_idx]
+
+        # log_lock.acquire()
+        # thread = threading.current_thread()
+        # print("PROFILER: {} func: {} action: {}".format(thread.name, frame.f_code.co_name, action_string))
+        # log_lock.release()
 
         if (action_string == 'call' and current_cp.before or
                 action_string == 'return' and not current_cp.before):
@@ -253,6 +281,7 @@ class InstrumentedThread(threading.Thread):
         self.baton = None
         self.initial_checkpoint = None
         self.terminal_checkpoint = None
+        self.setDaemon(True)
 
     def tune(self, baton, checkpoints):
         self.profiler.baton = baton
@@ -269,13 +298,13 @@ class InstrumentedThread(threading.Thread):
 
         # Check the initial checkpoint. Decide the order in which players start
         self.baton.wait_for_permission(self.initial_checkpoint)
-        self.baton.yield_permission()
+        self.baton.acknowledge_checkpoint(self.initial_checkpoint)
 
         super(InstrumentedThread, self).run()
 
         # Allows a player to finish, before allowing new one to start.
         self.baton.wait_for_permission(self.terminal_checkpoint)
-        self.baton.yield_permission()
+        self.baton.acknowledge_checkpoint(self.terminal_checkpoint)
 
 
 class Checkpoint(object):
