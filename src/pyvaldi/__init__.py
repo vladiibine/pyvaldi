@@ -41,9 +41,9 @@ class ProcessPlayer(object):
         """Return the initial checkpoint, that marks the process beginning"""
         return self._initial_checkpoint
 
-    def play(self, music_sheet, baton):
-        self.music_sheet = music_sheet
-        self.instrument.tune(baton, self)
+    def play(self, player_checkpoints, baton):
+        self.music_sheet = player_checkpoints
+        self.instrument.tune(baton, player_checkpoints)
         self.instrument.start()
 
     def __repr__(self):
@@ -157,7 +157,7 @@ class Baton(object):
         self.player_event = CascadingEventGroup(checkpoint_order)
         self.conductor_event = CascadingEventGroup(checkpoint_order)
 
-    def ask_for_permission(self, checkpoint):
+    def wait_for_permission(self, checkpoint):
         self.player_event.wait_on(checkpoint)
 
     def yield_permission(self, checkpoint):
@@ -211,16 +211,16 @@ class RhythmProfiler(object):
     def profile(self, frame, action_string, whatever):
         current_cp = self.checkpoints[self.checkpoint_idx]
 
+        if (action_string == 'call' and current_cp.before or
+                action_string == 'return' and not current_cp.before):
+            if current_cp.is_reached(frame.f_code):
+                self.baton.acknowledge_checkpoint(current_cp)
 
-        if current_cp.should_stop(frame.f_code):
-            pass
-        # IF CHECKPOINT REACHED
-        # if entering, ask for permission
-        self.baton.ask_for_permission(current_cp)
+                self.checkpoint_idx += 1
+                if self.checkpoint_idx >= len(self.checkpoints):
+                    return
 
-        # if returning, yield permission
-        self.baton.yield_permission()
-
+                self.baton.wait_for_permission(self.checkpoints[self.checkpoint_idx])
 
     # def __call__(self, frame, action_string, dunno):
     #     if self.checkpoint_idx >= len(self.confirming_checkpoints):
@@ -231,7 +231,7 @@ class RhythmProfiler(object):
     #     if current_checkpoint is None:
     #         return
     #
-    #     if not current_checkpoint.should_stop(frame.f_code):
+    #     if not current_checkpoint.is_reached(frame.f_code):
     #         return
     #
     #     if ((current_checkpoint.before and action_string == 'call') or
@@ -251,12 +251,15 @@ class InstrumentedThread(threading.Thread):
             group, target, name, args, kwargs, verbose)
         self.profiler = RhythmProfiler()
         self.baton = None
-        self.player = None
+        self.initial_checkpoint = None
+        self.terminal_checkpoint = None
 
     def tune(self, baton, checkpoints):
         self.profiler.baton = baton
         # the profiler handles the regular checkpoints, and
         # the thread - the implicit ones
+        self.initial_checkpoint = checkpoints[0]
+        self.terminal_checkpoint = checkpoints[-1]
         self.profiler.checkpoints = [
             cp for cp in checkpoints if not isinstance(cp, ImplicitCheckpoint)]
         self.baton = baton
@@ -265,13 +268,13 @@ class InstrumentedThread(threading.Thread):
         sys.setprofile(self.profiler.profile)
 
         # Check the initial checkpoint. Decide the order in which players start
-        self.baton.wait_for_permission(self.player.get_initial_checkpoint())
+        self.baton.wait_for_permission(self.initial_checkpoint)
         self.baton.yield_permission()
 
         super(InstrumentedThread, self).run()
 
         # Allows a player to finish, before allowing new one to start.
-        self.baton.wait_for_permission(self.player.get.terminal_checkpoint())
+        self.baton.wait_for_permission(self.terminal_checkpoint)
         self.baton.yield_permission()
 
 
@@ -298,7 +301,7 @@ class Checkpoint(object):
         self.callable = callable_
         self.before = before
 
-    def should_stop(self, code):
+    def is_reached(self, code):
         """
         :param code: a callable to compare to the managed one
         :rtype: bool
@@ -326,7 +329,7 @@ class NullCheckpoint(Checkpoint):
 
     Used for specifying that there is no checkpoint.
     """
-    def should_stop(self, code):
+    def is_reached(self, code):
         """Should never stop at this checkpoint"""
         return False
 
@@ -342,7 +345,7 @@ class ImplicitCheckpoint(Checkpoint):
     def __init__(self, player, callable_=None, before=False, name=None):
         super(ImplicitCheckpoint, self).__init__(player, None, before, name)
 
-    def should_stop(self, code):
+    def is_reached(self, code):
         """Should always stop at such a checkpoint"""
         return self.before
 
