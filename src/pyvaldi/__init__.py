@@ -89,7 +89,7 @@ class ProcessConductor(object):
                 # when notes are the same
                 if note is implicit_note:
                     self.note_idx += 1
-                    self.implicit_note_idx += 1
+                    # self.implicit_note_idx += 1
                     # TODO - actually, when reaching a checkpoint it shouldn't
                     # automatically release the lock. but without the next
                     # lines, all hell breaks loose
