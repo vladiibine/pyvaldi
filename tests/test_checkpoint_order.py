@@ -1,7 +1,8 @@
 import unittest
 
-from pyvaldi import (ProcessPlayer, ProcessConductor, MusicSheet, Checkpoint,
+from pyvaldi import (ProcessPlayer, ProcessConductor, MusicSheet,
                      ImplicitCheckpoint)
+from pyvaldi.checkpoints import Checkpoint, ImplicitCheckpoint
 from .artefacts import ThreePhaseMachine
 
 

@@ -1,6 +1,10 @@
-import pkg_resources
 import threading
-import sys
+
+import pkg_resources
+
+from pyvaldi.checkpoints import Checkpoint, NullCheckpoint, ImplicitCheckpoint
+from pyvaldi.sync import CascadingEventGroup
+from pyvaldi.thread import InstrumentedThread
 
 try:
     __version__ = pkg_resources.get_distribution('pyvaldi').version
@@ -63,7 +67,8 @@ class ProcessConductor(object):
     def __init__(self, players=None, checkpoints=None):
         """
         :param list[ProcessPlayer] players: a list of process players
-        :param list[Checkpoint] checkpoints: an list of checkpoints (notes)
+        :param list[pyvaldi.checkpoints.Checkpoint] checkpoints: an list of
+        checkpoints (notes)
         """
         self.players = players
         self.checkpoints = checkpoints
@@ -78,30 +83,30 @@ class ProcessConductor(object):
             player.play(self.music_sheet.player_checkpoints(player), self.baton)
 
     def next(self):
-        """Lets the 2 processes run until the next specified checkpoint is reached"""
-        notes = self.checkpoints
-        implicit_notes = self.music_sheet.checkpoint_order
+        """
+        User CPS:       C1-1       C2-1   C1-2   C2-2   C2-3   C2-4         C1-3
+        Impli CPS: IC1  C1-1  IC2  C2-1   C1-2   C2-2   C2-3   C2-4   TC2   C1-3   TC1
 
-        while self.note_idx < len(notes):
-            while self.implicit_note_idx < len(implicit_notes):
-                note = notes[self.note_idx]
-                implicit_note = implicit_notes[self.implicit_note_idx]
-                # when notes are the same
-                if note is implicit_note:
-                    self.note_idx += 1
-                    # self.implicit_note_idx += 1
-                    # TODO - actually, when reaching a checkpoint it shouldn't
-                    # automatically release the lock. but without the next
-                    # lines, all hell breaks loose
-                    # self.baton.yield_permission(note)
-                    # self.baton.wait_acknowledgement(note)
-                    return notes[self.note_idx - 1]
-                # when the notes differ
-                else:
-                    self.baton.yield_permission(implicit_note)
-                    # when this returns, the checkpoint has been reached!!!
-                    self.baton.wait_acknowledgement(implicit_note)
-                    self.implicit_note_idx += 1
+        Restrict!
+            - always enter on user note
+            - increase implicit index, until meeting the user note
+        """
+        notes = self.checkpoints
+        i_notes = self.music_sheet.checkpoint_order
+        if self.note_idx >= len(notes):
+            return
+
+        while i_notes[self.implicit_note_idx] is not notes[self.note_idx]:
+            self.baton.yield_permission(i_notes[self.implicit_note_idx])
+            self.baton.wait_acknowledgement(i_notes[self.implicit_note_idx])
+            self.implicit_note_idx += 1
+            if self.implicit_note_idx >= len(i_notes):
+                return
+        else:
+            try:
+                return notes[self.note_idx]
+            finally:
+                self.note_idx += 1
 
     def __iter__(self):
         return self
@@ -120,7 +125,7 @@ class MusicSheet(object):
         """Return a list of players, representing the order they should be
         allowed to play in.
 
-        :rtype: list[Checkpoint]
+        :rtype: list[pyvaldi.checkpoints.Checkpoint]
         """
         # We'll receive a list of checkpoints...
         # MAYBE containing the implicit checkpoints already
@@ -190,229 +195,3 @@ class Baton(object):
         self.conductor_event.done_with(checkpoint)
 
 
-class CascadingEventGroup(object):
-    """A collection of events, that can only be set in the order specified by
-    the token list
-    """
-    def __init__(self, tokens, name=None):
-        self.tokens = tokens
-        self.name = name
-
-        self.token_idx = 0
-        self.events = [(token, threading.Event()) for token in tokens]
-        self.event_dict = dict(self.events)
-        self.release_lock = threading.Lock()
-
-    def wait_on(self, token):
-        self.event_dict[token].wait()
-
-    def done_with(self, token):
-        # protection for when incrementing and setting the events
-        self.release_lock.acquire()
-        # protection against wrong token releasing the lock
-        if token is not self.events[self.token_idx][0]:
-            self.release_lock.release()
-            raise threading.ThreadError(
-                "At this time, releasing the lock can only be done with "
-                "token {}".format(str(self.events[self.token_idx][0])))
-        if self.token_idx + 1 >= len(self.events):
-            self.release_lock.release()
-            return
-
-        self.token_idx += 1
-        self.events[self.token_idx - 1][1].set()
-        self.release_lock.release()
-
-    def __repr__(self):
-        return u"<CEG {}>".format(self.name if self.name else '')
-
-
-class RhythmProfiler(object):
-    def __init__(self):
-        self.baton = None
-        self.checkpoints = None
-        self.checkpoint_idx = 0
-
-    def profile(self, frame, action_string, whatever):
-        if self.checkpoint_idx >= len(self.checkpoints):
-            return
-
-        current_cp = self.checkpoints[self.checkpoint_idx]
-
-        # log_lock.acquire()
-        # thread = threading.current_thread()
-        # print("PROFILER: {} func: {} action: {}".format(thread.name, frame.f_code.co_name, action_string))
-        # log_lock.release()
-        print(frame.f_code.co_name, action_string)
-
-        if (action_string == 'call' and current_cp.before or
-                action_string == 'return' and not current_cp.before):
-            if current_cp.is_reached(frame.f_code):
-                self.baton.wait_for_permission(current_cp)
-                self.baton.acknowledge_checkpoint(current_cp)
-                # print('asdf', current_cp)
-                # import  time; time.sleep(1)
-
-                self.checkpoint_idx += 1
-                if self.checkpoint_idx >= len(self.checkpoints):
-                    return
-
-                self.baton.wait_for_permission(self.checkpoints[self.checkpoint_idx])
-
-    # def __call__(self, frame, action_string, dunno):
-    #     if self.checkpoint_idx >= len(self.confirming_checkpoints):
-    #         return
-    #
-    #     current_checkpoint = self.confirming_checkpoints[self.checkpoint_idx]
-    #
-    #     if current_checkpoint is None:
-    #         return
-    #
-    #     if not current_checkpoint.is_reached(frame.f_code):
-    #         return
-    #
-    #     if ((current_checkpoint.before and action_string == 'call') or
-    #             (not current_checkpoint.before and action_string == 'return')):
-    #         self.checkpoint_reached_callback(current_checkpoint)
-    #         self.condition.acquire()
-    #         self.condition.wait()
-    #         self.condition.release()
-    #
-    #         self.checkpoint_idx += 1
-
-
-class InstrumentedThread(threading.Thread):
-    def __init__(self, group=None, target=None, name=None,
-             args=(), kwargs=None, verbose=None):
-        super(InstrumentedThread, self).__init__(
-            group, target, name, args, kwargs, verbose)
-        self.profiler = RhythmProfiler()
-        self.baton = None
-        self.initial_checkpoint = None
-        self.terminal_checkpoint = None
-        self.setDaemon(True)
-
-    def tune(self, baton, checkpoints):
-        self.profiler.baton = baton
-        # the profiler handles the regular checkpoints, and
-        # the thread - the implicit ones
-        self.initial_checkpoint = checkpoints[0]
-        self.terminal_checkpoint = checkpoints[-1]
-        self.profiler.checkpoints = [
-            cp for cp in checkpoints if not isinstance(cp, ImplicitCheckpoint)]
-        self.baton = baton
-
-    def run(self):
-        sys.setprofile(self.profiler.profile)
-
-        # Check the initial checkpoint. Decide the order in which players start
-        self.baton.wait_for_permission(self.initial_checkpoint)
-        self.baton.acknowledge_checkpoint(self.initial_checkpoint)
-
-        super(InstrumentedThread, self).run()
-
-        # Allows a player to finish, before allowing new one to start.
-        self.baton.wait_for_permission(self.terminal_checkpoint)
-        self.baton.acknowledge_checkpoint(self.terminal_checkpoint)
-
-
-class Checkpoint(object):
-    """Represents an instance in the life of a process.
-
-    The :class:`ProcessPlayer` will know to pause all the running processes
-    when one of them have reached such a checkpoint
-    """
-    def __init__(self, player, callable_, before=False, name=None):
-        """
-
-        :param ProcessPlayer | None player: The ProcessStarter on which this
-            checkpoint was set
-        :param callable_: Any callable. Will stop before or after it has been
-            called.
-        :param bool | None before: whether to stop before or after the callable
-            was invoked
-        :param str | None name: The name of this checkpoint
-            (for easier debugging)
-        """
-        self.name = name
-        self.player = player
-        self.callable = callable_
-        self.before = before
-
-    def is_reached(self, code):
-        """
-        :param code: a callable to compare to the managed one
-        :rtype: bool
-        """
-        return self.callable.func_code is code
-
-    def _get_display_name(self):
-        return u"'{}'".format(self.name) if self.name is not None else u''
-
-    def __repr__(self):
-        return u"<CP {name}of {player} at {id}>".format(
-            name=self._get_display_name(), id=id(self), player=self.player)
-
-    def is_initial(self):
-        return False
-
-    def is_terminal(self):
-        return False
-
-    __str__ = __repr__
-
-
-class NullCheckpoint(Checkpoint):
-    """Special 'Null object' type for checkpoints, so as not to abuse `None`
-
-    Used for specifying that there is no checkpoint.
-    """
-    def is_reached(self, code):
-        """Should never stop at this checkpoint"""
-        return False
-
-    def __repr__(self):
-        return u"<NULL Checkpoint {name}at {id}>".format(
-            name=self._get_display_name(), id=id(self))
-
-    __str__ = __repr__
-
-
-class ImplicitCheckpoint(Checkpoint):
-    """Represents the initial/ terminal implicit points for a process"""
-    def __init__(self, player, callable_=None, before=False, name=None):
-        super(ImplicitCheckpoint, self).__init__(player, None, before, name)
-
-    def is_reached(self, code):
-        """Should always stop at such a checkpoint"""
-        return self.before
-
-    def __repr__(self):
-        if self.before:
-            subtype = u'Init.'
-        else:
-            subtype = u'Term.'
-        return u"<{subtype} CP {name}of {player} at {id}>".format(
-            name=self._get_display_name(),
-            subtype=subtype,
-            id=id(self),
-            player=self.player
-        )
-
-    __str__ = __repr__
-
-    def __lt__(self, other):
-        if not isinstance(other, Checkpoint):
-            raise TypeError("Type of {} and {} are not comparable".format(self, other))  # noqa
-        if self.player is not other.player:
-            raise ValueError("{} and {} have different players".format(self, other))
-
-        return self.before > other.before
-
-    def is_initial(self):
-        return self.before
-
-    def is_terminal(self):
-        return not self.before
-
-NULL_CHECKPOINT = NullCheckpoint(None, None, None)
